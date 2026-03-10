@@ -36,15 +36,10 @@ class SettingsController extends ApiMutableModelControllerBase
     protected static $internalModelName = 'approuter';
     protected static $internalModelClass = 'OPNsense\Approuter\Approuter';
 
-    public function getGeneralAction()
-    {
-        return $this->getBase('general', 'general');
-    }
-
-    public function setGeneralAction()
-    {
-        return $this->setBase('general', 'general');
-    }
+    // getAction() and setAction() are auto-provided by the base class
+    // They handle the full model (general + lists sections)
+    // API: GET /api/approuter/settings/get
+    //      POST /api/approuter/settings/set
 
     public function searchRuleAction()
     {
@@ -78,16 +73,6 @@ class SettingsController extends ApiMutableModelControllerBase
     public function toggleRuleAction($uuid, $enabled = null)
     {
         return $this->toggleBase('rules.rule', $uuid, $enabled);
-    }
-
-    public function getListsAction()
-    {
-        return $this->getBase('lists', 'lists');
-    }
-
-    public function setListsAction()
-    {
-        return $this->setBase('lists', 'lists');
     }
 
     public function getGatewaysAction()

@@ -19,20 +19,18 @@
 
 <script>
     $( document ).ready(function() {
-        var data_get_map = {'frm_GeneralSettings':"/api/approuter/settings/getGeneral"};
+        // Both forms share the same model endpoint - load once, populate both
+        var data_get_map = {
+            'frm_GeneralSettings': "/api/approuter/settings/get",
+            'frm_ListSettings': "/api/approuter/settings/get"
+        };
         mapDataToFormUI(data_get_map).done(function(data){
             formatTokenizersUI();
             $('.selectpicker').selectpicker('refresh');
         });
 
-        var list_data_map = {'frm_ListSettings':"/api/approuter/settings/getLists"};
-        mapDataToFormUI(list_data_map).done(function(data){
-            formatTokenizersUI();
-            $('.selectpicker').selectpicker('refresh');
-        });
-
         $("#saveGeneralAct").click(function(){
-            saveFormToEndpoint(url="/api/approuter/settings/setGeneral", formid='frm_GeneralSettings', callback_ok=function(){
+            saveFormToEndpoint(url="/api/approuter/settings/set", formid='frm_GeneralSettings', callback_ok=function(){
                 $("#saveGeneralAct_progress").addClass("fa fa-spinner fa-pulse");
                 ajaxCall(url="/api/approuter/service/reconfigure", sendData={}, callback=function(data,status) {
                     $("#saveGeneralAct_progress").removeClass("fa fa-spinner fa-pulse");
@@ -41,7 +39,7 @@
         });
 
         $("#saveListsAct").click(function(){
-            saveFormToEndpoint(url="/api/approuter/settings/setLists", formid='frm_ListSettings', callback_ok=function(){
+            saveFormToEndpoint(url="/api/approuter/settings/set", formid='frm_ListSettings', callback_ok=function(){
                 $("#saveListsAct_progress").addClass("fa fa-spinner fa-pulse");
                 ajaxCall(url="/api/approuter/service/reconfigure", sendData={}, callback=function(data,status) {
                     $("#saveListsAct_progress").removeClass("fa fa-spinner fa-pulse");
