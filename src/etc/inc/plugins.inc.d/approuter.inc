@@ -41,6 +41,8 @@ function approuter_firewall(\OPNsense\Firewall\Plugin $fw)
 
     $tablePrefix = (string)$mdl->general->tablePrefix ?: 'approuter';
     $cidrsDir = '/usr/local/etc/app-router/cidrs';
+    $clientsDir = '/usr/local/etc/app-router/clients';
+    @mkdir($clientsDir, 0750, true);
 
     $categoriesNeeded = [];
     $rules = [];
@@ -102,8 +104,10 @@ function approuter_firewall(\OPNsense\Firewall\Plugin $fw)
         $fromClause = 'any';
         if (!$isAny) {
             $clientTableName = $tablePrefix . '_clients_' . substr(md5($rule['uuid']), 0, 8);
+            $clientFile = $clientsDir . '/' . $clientTableName . '.txt';
+            file_put_contents($clientFile, implode("\n", $sourceNets) . "\n");
             $fw->registerTable($clientTableName, [
-                'content' => $sourceNets,
+                'file' => $clientFile,
                 'persist' => true,
             ]);
             $fromClause = '<' . $clientTableName . '>';

@@ -28,6 +28,7 @@
 
 namespace OPNsense\Approuter\Api;
 
+use OPNsense\Approuter\Approuter;
 use OPNsense\Base\ApiMutableServiceControllerBase;
 use OPNsense\Core\Backend;
 
@@ -51,6 +52,16 @@ class ServiceController extends ApiMutableServiceControllerBase
                 $backend->configdRun('approuter update_lists');
             }
             $backend->configdRun('filter reload');
+
+            // Start/restart dns_watcher if in unbound mode
+            $mdl = new Approuter();
+            if ((string)$mdl->general->dnsResolver === 'unbound') {
+                $backend->configdRun('approuter dns_watcher_start');
+            } else {
+                // Stop watcher if switching away from unbound
+                $backend->configdRun('approuter dns_watcher_stop');
+            }
+
             $status = "ok";
         }
         return ['status' => $status];
@@ -83,18 +94,39 @@ class ServiceController extends ApiMutableServiceControllerBase
     public function statusAction()
     {
         $backend = new Backend();
-        $response = trim($backend->configdRun('approuter status'));
-        $data = json_decode($response, true);
-        if ($data === null) {
-            return ['status' => 'error', 'message' => $response];
-        }
-        return ['status' => 'ok', 'data' => $data];
-    }
 
-    public function tableStatsAction()
-    {
-        $backend = new Backend();
-        $response = trim($backend->configdRun('approuter table_stats'));
-        return ['status' => 'ok', 'data' => $response];
+        // Basic status from list_updater
+        $response = trim($backend->configdRun('approuter status'));
+        $data = json_decode($response, true) ?: [];
+
+        // DNS watcher status
+        $watcherResponse = trim($backend->configdRun('approuter dns_watcher_status'));
+        $watcherData = json_decode($watcherResponse, true);
+        $data['dns_watcher'] = $watcherData ?: ['running' => false];
+
+        // DNS resolver mode
+        $mdl = new Approuter();
+        $data['dns_resolver'] = (string)$mdl->general->dnsResolver ?: 'dnsmasq';
+        $data['enabled'] = (string)$mdl->general->enabled;
+
+        // pf table stats — count entries in each approuter table
+        $tablePrefix = (string)$mdl->general->tablePrefix ?: 'approuter';
+        $tables = [];
+        exec("/sbin/pfctl -s Tables 2>/dev/null", $tableLines);
+        foreach ($tableLines as $line) {
+            $tbl = trim($line);
+            if (strpos($tbl, $tablePrefix . '_') === 0) {
+                $count = 0;
+                exec("/sbin/pfctl -t " . escapeshellarg($tbl) . " -T show 2>/dev/null", $entries);
+                $count = count(array_filter($entries, function ($e) {
+                    return trim($e) !== '';
+                }));
+                $tables[$tbl] = $count;
+                unset($entries);
+            }
+        }
+        $data['pf_tables'] = $tables;
+
+        return ['status' => 'ok', 'data' => $data];
     }
 }

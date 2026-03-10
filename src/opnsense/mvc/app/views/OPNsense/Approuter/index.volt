@@ -86,23 +86,56 @@
             ajaxGet(url="/api/approuter/service/status", sendData={}, callback=function(data, status) {
                 if (data && data.data) {
                     var info = data.data;
-                    var html = '<table class="table table-condensed">';
+                    var html = '';
+
+                    // Service status
+                    html += '<h4>{{ lang._("Service") }}</h4>';
+                    html += '<table class="table table-condensed table-striped">';
+                    html += '<tr><td style="width:200px">{{ lang._("Plugin Enabled") }}</td><td>' +
+                        (info.enabled === '1' ? '<span class="label label-success">Yes</span>' : '<span class="label label-danger">No</span>') + '</td></tr>';
+                    html += '<tr><td>{{ lang._("DNS Resolver") }}</td><td>' + (info.dns_resolver || 'N/A') + '</td></tr>';
+                    if (info.dns_watcher) {
+                        var watcherLabel = info.dns_watcher.running ?
+                            '<span class="label label-success">Running (PID ' + info.dns_watcher.pid + ')</span>' :
+                            '<span class="label label-danger">Stopped</span>';
+                        html += '<tr><td>{{ lang._("DNS Watcher") }}</td><td>' + watcherLabel + '</td></tr>';
+                    }
                     if (info.last_full_update) {
                         var d = new Date(info.last_full_update * 1000);
-                        html += '<tr><td>Last Update</td><td>' + d.toLocaleString() + '</td></tr>';
+                        html += '<tr><td>{{ lang._("Last List Update") }}</td><td>' + d.toLocaleString() + '</td></tr>';
                     }
+                    html += '</table>';
+
+                    // List stats
+                    html += '<h4>{{ lang._("Lists") }}</h4>';
+                    html += '<table class="table table-condensed table-striped">';
                     if (info.china_cidrs_count) {
-                        html += '<tr><td>China CIDRs</td><td>' + info.china_cidrs_count + '</td></tr>';
+                        html += '<tr><td style="width:200px">{{ lang._("China CIDRs") }}</td><td>' + info.china_cidrs_count + '</td></tr>';
                     }
                     if (info.china_domains_count) {
-                        html += '<tr><td>China Domains</td><td>' + info.china_domains_count + '</td></tr>';
+                        html += '<tr><td>{{ lang._("China Domains") }}</td><td>' + info.china_domains_count + '</td></tr>';
                     }
                     if (info.categories) {
                         for (var cat in info.categories) {
-                            html += '<tr><td>Category: ' + cat + '</td><td>' + info.categories[cat] + ' domains</td></tr>';
+                            html += '<tr><td>' + cat + '</td><td>' + info.categories[cat] + ' domains</td></tr>';
                         }
                     }
                     html += '</table>';
+
+                    // pf table stats
+                    if (info.pf_tables && Object.keys(info.pf_tables).length > 0) {
+                        html += '<h4>{{ lang._("PF Tables") }}</h4>';
+                        html += '<table class="table table-condensed table-striped">';
+                        html += '<thead><tr><th>{{ lang._("Table") }}</th><th>{{ lang._("Entries") }}</th></tr></thead>';
+                        for (var tbl in info.pf_tables) {
+                            var cnt = info.pf_tables[tbl];
+                            var badge = cnt > 0 ? '<span class="label label-success">' + cnt + '</span>' :
+                                '<span class="label label-warning">0 (empty)</span>';
+                            html += '<tr><td>' + tbl + '</td><td>' + badge + '</td></tr>';
+                        }
+                        html += '</table>';
+                    }
+
                     $("#statusInfo").html(html);
                 }
             });
@@ -196,6 +229,10 @@
                 <div id="statusInfo">
                     <p>{{ lang._('Loading...') }}</p>
                 </div>
+                <hr />
+                <button class="btn btn-default" id="refreshStatusAct" type="button" onclick="loadStatus()">
+                    <b>{{ lang._('Refresh') }}</b> <i class="fa fa-refresh"></i>
+                </button>
             </div>
         </div>
     </div>
