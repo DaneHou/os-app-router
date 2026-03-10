@@ -29,6 +29,7 @@
 namespace OPNsense\Approuter\Api;
 
 use OPNsense\Base\ApiMutableModelControllerBase;
+use OPNsense\Core\Backend;
 use OPNsense\Core\Config;
 
 class SettingsController extends ApiMutableModelControllerBase
@@ -87,25 +88,7 @@ class SettingsController extends ApiMutableModelControllerBase
             }
             $result['rule']['categories'] = $catOptions;
 
-            // Augment sourceNets: CSVListField → select_multiple options
-            // Custom input enabled via data-allownew="true" set in index.volt JS
-            $netValue = is_string($result['rule']['sourceNets']) ? $result['rule']['sourceNets'] : '';
-            $netSelected = array_filter(array_map('trim', explode(',', $netValue)));
-            $networks = $this->getNetworksAction();
-            $netOptions = [];
-            foreach ($networks['rows'] as $net) {
-                $netOptions[$net['value']] = [
-                    'value' => $net['label'],
-                    'selected' => in_array($net['value'], $netSelected) ? 1 : 0,
-                ];
-            }
-            // Preserve any user-typed custom values not in predefined list
-            foreach ($netSelected as $val) {
-                if (!empty($val) && !isset($netOptions[$val])) {
-                    $netOptions[$val] = ['value' => $val, 'selected' => 1];
-                }
-            }
-            $result['rule']['sourceNets'] = $netOptions;
+            // sourceNets: plain text field, no augmentation needed
         }
 
         return $result;
@@ -235,56 +218,21 @@ class SettingsController extends ApiMutableModelControllerBase
     public function getGatewaysAction()
     {
         $result = ['rows' => []];
-        $seen = [];
 
-        // Method 1: Use OPNsense Routing model (24.7+) — the canonical source
-        try {
-            $gwModel = new \OPNsense\Routing\Gateways();
-            foreach ($gwModel->gateway_item->iterateItems() as $uuid => $gw) {
-                $name = (string)$gw->name;
-                if (!empty($name) && (string)$gw->disabled !== '1' && !isset($seen[$name])) {
-                    $seen[$name] = true;
+        // Use configd backend — same method OPNsense core uses
+        $backend = new Backend();
+        $response = trim($backend->configdpRun('interface routes gateways status'));
+        $gateways = json_decode($response, true);
+
+        if (is_array($gateways)) {
+            foreach ($gateways as $gwName => $gwData) {
+                if (is_array($gwData) && !empty($gwName)) {
                     $result['rows'][] = [
-                        'name' => $name,
-                        'interface' => (string)$gw->interface,
-                        'gateway' => (string)$gw->gateway,
-                        'descr' => (string)$gw->descr,
+                        'name' => $gwData['name'] ?? $gwName,
+                        'interface' => $gwData['interface'] ?? '',
+                        'gateway' => $gwData['address'] ?? $gwData['gateway'] ?? '',
+                        'descr' => $gwData['descr'] ?? '',
                     ];
-                }
-            }
-        } catch (\Throwable $e) {
-            // Model not available on this OPNsense version
-        }
-
-        // Method 2: Fallback to config.xml for older versions
-        if (empty($result['rows'])) {
-            $config = Config::getInstance()->object();
-            if (isset($config->gateways->gateway_item)) {
-                foreach ($config->gateways->gateway_item as $gw) {
-                    $name = (string)$gw->name;
-                    if (!empty($name) && !isset($seen[$name])) {
-                        $seen[$name] = true;
-                        $result['rows'][] = [
-                            'name' => $name,
-                            'interface' => (string)$gw->interface,
-                            'gateway' => (string)$gw->gateway,
-                            'descr' => (string)$gw->descr,
-                        ];
-                    }
-                }
-            }
-            if (isset($config->gateways->gateway_group)) {
-                foreach ($config->gateways->gateway_group as $gwg) {
-                    $name = (string)$gwg->name;
-                    if (!empty($name) && !isset($seen[$name])) {
-                        $seen[$name] = true;
-                        $result['rows'][] = [
-                            'name' => $name,
-                            'interface' => '',
-                            'gateway' => 'group',
-                            'descr' => (string)$gwg->descr . ' (group)',
-                        ];
-                    }
                 }
             }
         }

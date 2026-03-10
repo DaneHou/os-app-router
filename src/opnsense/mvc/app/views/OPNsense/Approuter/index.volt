@@ -19,10 +19,6 @@
 
 <script>
     $( document ).ready(function() {
-        // Enable custom input for Source field (type any IP/subnet + predefined suggestions)
-        // Must be set BEFORE tokenize2 initializes on the element
-        $('#rule\\.sourceNets').attr('data-allownew', 'true');
-
         // Both forms share the same model endpoint - load once, populate both
         var data_get_map = {
             'frm_GeneralSettings': "/api/approuter/settings/get",
@@ -210,7 +206,7 @@
         {'id': 'rule.enabled', 'label': lang._('Enabled'), 'type': 'checkbox'},
         {'id': 'rule.description', 'label': lang._('Description'), 'type': 'text'},
         {'id': 'rule.interface', 'label': lang._('Interface'), 'type': 'dropdown', 'help': lang._('Inbound interface')},
-        {'id': 'rule.sourceNets', 'label': lang._('Source'), 'type': 'select_multiple', 'help': lang._('Select "any" for all traffic, or choose interface nets / type specific IPs')},
+        {'id': 'rule.sourceNets', 'label': lang._('Source'), 'type': 'text', 'help': lang._('Enter "any" or comma-separated IPs/subnets (e.g. 192.168.1.0/24, 10.0.0.5)')},
         {'id': 'rule.categories', 'label': lang._('App Categories'), 'type': 'select_multiple', 'help': lang._('Search and select app categories or individual apps')},
         {'id': 'rule.gateway', 'label': lang._('Gateway'), 'type': 'dropdown', 'help': lang._('Target gateway for routing')}
     ],
