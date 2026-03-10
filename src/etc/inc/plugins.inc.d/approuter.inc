@@ -26,14 +26,14 @@
  *    POSSIBILITY OF SUCH DAMAGE.
  */
 
-use OPNsense\AppRouter\AppRouter;
+use OPNsense\Approuter\Approuter;
 
 /**
  * Register AppRouter firewall rules and pf tables
  */
 function approuter_firewall(\OPNsense\Firewall\Plugin $fw)
 {
-    $mdl = new AppRouter();
+    $mdl = new Approuter();
 
     if ((string)$mdl->general->enabled !== '1') {
         return;
@@ -131,7 +131,7 @@ function approuter_firewall(\OPNsense\Firewall\Plugin $fw)
 function approuter_services()
 {
     $services = [];
-    $mdl = new AppRouter();
+    $mdl = new Approuter();
 
     if ((string)$mdl->general->enabled === '1') {
         if ((string)$mdl->general->dnsResolver === 'unbound') {
@@ -169,7 +169,7 @@ function approuter_syslog()
 function approuter_cron()
 {
     $jobs = [];
-    $mdl = new AppRouter();
+    $mdl = new Approuter();
 
     if ((string)$mdl->general->enabled === '1') {
         $interval = (string)$mdl->general->updateInterval ?: 'daily';
@@ -183,7 +183,7 @@ function approuter_cron()
                         'hours' => '*',
                     ],
                     'origin' => 'approuter',
-                    'command' => '/usr/local/opnsense/scripts/OPNsense/AppRouter/list_updater.py update',
+                    'command' => '/usr/local/opnsense/scripts/OPNsense/Approuter/list_updater.py update',
                 ];
                 break;
             case 'weekly':
@@ -195,7 +195,7 @@ function approuter_cron()
                         'days' => '1',
                     ],
                     'origin' => 'approuter',
-                    'command' => '/usr/local/opnsense/scripts/OPNsense/AppRouter/list_updater.py update',
+                    'command' => '/usr/local/opnsense/scripts/OPNsense/Approuter/list_updater.py update',
                 ];
                 break;
             default:
@@ -206,7 +206,7 @@ function approuter_cron()
                         'hours' => '3',
                     ],
                     'origin' => 'approuter',
-                    'command' => '/usr/local/opnsense/scripts/OPNsense/AppRouter/list_updater.py update',
+                    'command' => '/usr/local/opnsense/scripts/OPNsense/Approuter/list_updater.py update',
                 ];
                 break;
         }

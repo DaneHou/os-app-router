@@ -26,15 +26,15 @@
  *    POSSIBILITY OF SUCH DAMAGE.
  */
 
-namespace OPNsense\AppRouter\Api;
+namespace OPNsense\Approuter\Api;
 
 use OPNsense\Base\ApiMutableServiceControllerBase;
 use OPNsense\Core\Backend;
 
 class ServiceController extends ApiMutableServiceControllerBase
 {
-    protected static $internalServiceClass = '\OPNsense\AppRouter\AppRouter';
-    protected static $internalServiceTemplate = 'OPNsense/AppRouter';
+    protected static $internalServiceClass = '\OPNsense\Approuter\Approuter';
+    protected static $internalServiceTemplate = 'OPNsense/Approuter';
     protected static $internalServiceEnabled = 'general.enabled';
     protected static $internalServiceName = 'approuter';
 
@@ -44,8 +44,12 @@ class ServiceController extends ApiMutableServiceControllerBase
         if ($this->request->isPost()) {
             $this->sessionClose();
             $backend = new Backend();
-            $backend->configdRun('template reload OPNsense/AppRouter');
+            $backend->configdRun('template reload OPNsense/Approuter');
             $backend->configdRun('approuter generate_dns');
+            // Auto-update lists if they don't exist yet
+            if (!file_exists('/usr/local/etc/app-router/cidrs/china_all.txt')) {
+                $backend->configdRun('approuter update_lists');
+            }
             $backend->configdRun('filter reload');
             $status = "ok";
         }

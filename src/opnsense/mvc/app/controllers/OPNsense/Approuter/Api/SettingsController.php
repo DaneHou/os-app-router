@@ -26,7 +26,7 @@
  *    POSSIBILITY OF SUCH DAMAGE.
  */
 
-namespace OPNsense\AppRouter\Api;
+namespace OPNsense\Approuter\Api;
 
 use OPNsense\Base\ApiMutableModelControllerBase;
 use OPNsense\Core\Config;
@@ -34,7 +34,7 @@ use OPNsense\Core\Config;
 class SettingsController extends ApiMutableModelControllerBase
 {
     protected static $internalModelName = 'approuter';
-    protected static $internalModelClass = 'OPNsense\AppRouter\AppRouter';
+    protected static $internalModelClass = 'OPNsense\Approuter\Approuter';
 
     public function getGeneralAction()
     {

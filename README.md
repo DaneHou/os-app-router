@@ -43,7 +43,7 @@ rm -rf /usr/local/etc/app-router
 
 ## Quick Start
 
-1. Enable AppRouter in `Firewall > AppRouter > General`
+1. Enable AppRouter in `Services > AppRouter > General`
 2. Select your DNS resolver (Dnsmasq or Unbound)
 3. Go to the **Routing Rules** tab and add a rule:
    - **Source Networks**: Your LAN subnet (e.g., `192.168.1.0/24`)
@@ -79,7 +79,7 @@ traceroute bilibili.com   # Should show traffic going through configured gateway
 ```
 OPNsense Web UI
     │
-    ├── MVC Model (AppRouter.xml) ─── Config Storage (config.xml)
+    ├── MVC Model (Approuter.xml) ─── Config Storage (config.xml)
     ├── API Controllers ───────────── REST endpoints
     └── configd actions ───────────── Script execution
          │

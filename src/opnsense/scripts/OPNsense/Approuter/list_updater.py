@@ -22,7 +22,7 @@ DOMAINS_DIR = os.path.join(BASE_DIR, "domains")
 CIDRS_DIR = os.path.join(BASE_DIR, "cidrs")
 DNSMASQ_DIR = os.path.join(BASE_DIR, "dnsmasq.d")
 UNBOUND_DIR = os.path.join(BASE_DIR, "unbound.d")
-CATEGORIES_FILE = "/usr/local/opnsense/scripts/OPNsense/AppRouter/app_categories.json"
+CATEGORIES_FILE = "/usr/local/opnsense/scripts/OPNsense/Approuter/app_categories.json"
 CONFIG_FILE = os.path.join(BASE_DIR, "config.json")
 STATE_FILE = os.path.join(BASE_DIR, "state.json")
 
@@ -256,7 +256,7 @@ def update_remote_lists(config, state):
 
 
 def update_tables():
-    script = "/usr/local/opnsense/scripts/OPNsense/AppRouter/table_manager.sh"
+    script = "/usr/local/opnsense/scripts/OPNsense/Approuter/table_manager.sh"
     if os.path.exists(script):
         try:
             subprocess.run([script, "reload_all"], check=True, timeout=30)

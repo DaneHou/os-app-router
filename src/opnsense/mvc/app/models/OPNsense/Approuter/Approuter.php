@@ -27,10 +27,10 @@
  *    POSSIBILITY OF SUCH DAMAGE.
  */
 
-namespace OPNsense\AppRouter;
+namespace OPNsense\Approuter;
 
 use OPNsense\Base\BaseModel;
 
-class AppRouter extends BaseModel
+class Approuter extends BaseModel
 {
 }

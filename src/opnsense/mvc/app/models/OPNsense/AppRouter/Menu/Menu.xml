@@ -1,7 +1,0 @@
-<menu>
-    <Firewall order="50">
-        <AppRouter VisibleName="AppRouter" cssclass="fa fa-random" url="/ui/approuter" order="90">
-            <Settings VisibleName="Settings" url="/ui/approuter" order="10" />
-        </AppRouter>
-    </Firewall>
-</menu>

@@ -5,7 +5,7 @@ PLUGIN_COMMENT=	Application-aware routing plugin for OPNsense
 PREFIX?=	/usr/local
 DESTDIR?=
 
-PLUGIN_SCRIPTS=	$(DESTDIR)$(PREFIX)/opnsense/scripts/OPNsense/AppRouter
+PLUGIN_SCRIPTS=	$(DESTDIR)$(PREFIX)/opnsense/scripts/OPNsense/Approuter
 PLUGIN_MVC=	$(DESTDIR)$(PREFIX)/opnsense/mvc/app
 PLUGIN_SERVICE=	$(DESTDIR)$(PREFIX)/opnsense/service
 PLUGIN_CONF=	$(DESTDIR)$(PREFIX)/etc/app-router
@@ -17,9 +17,7 @@ install: install-plugin activate
 	@echo ""
 	@echo "========================================="
 	@echo " $(PLUGIN_NAME) $(PLUGIN_VERSION) installed"
-	@echo " Navigate to Firewall > AppRouter in the web UI"
-	@echo " Run initial list update:"
-	@echo "   configctl approuter update_lists"
+	@echo " Navigate to Services > AppRouter in the web UI"
 	@echo "========================================="
 
 install-plugin:
@@ -28,39 +26,39 @@ install-plugin:
 	@mkdir -p $(PLUGIN_HOOK)
 	@cp src/etc/inc/plugins.inc.d/approuter.inc $(PLUGIN_HOOK)/approuter.inc
 	@# MVC Models
-	@mkdir -p $(PLUGIN_MVC)/models/OPNsense/AppRouter/Menu
-	@mkdir -p $(PLUGIN_MVC)/models/OPNsense/AppRouter/ACL
-	@cp src/opnsense/mvc/app/models/OPNsense/AppRouter/AppRouter.xml \
-		$(PLUGIN_MVC)/models/OPNsense/AppRouter/AppRouter.xml
-	@cp src/opnsense/mvc/app/models/OPNsense/AppRouter/AppRouter.php \
-		$(PLUGIN_MVC)/models/OPNsense/AppRouter/AppRouter.php
-	@cp src/opnsense/mvc/app/models/OPNsense/AppRouter/Menu/Menu.xml \
-		$(PLUGIN_MVC)/models/OPNsense/AppRouter/Menu/Menu.xml
-	@cp src/opnsense/mvc/app/models/OPNsense/AppRouter/ACL/ACL.xml \
-		$(PLUGIN_MVC)/models/OPNsense/AppRouter/ACL/ACL.xml
+	@mkdir -p $(PLUGIN_MVC)/models/OPNsense/Approuter/Menu
+	@mkdir -p $(PLUGIN_MVC)/models/OPNsense/Approuter/ACL
+	@cp src/opnsense/mvc/app/models/OPNsense/Approuter/Approuter.xml \
+		$(PLUGIN_MVC)/models/OPNsense/Approuter/Approuter.xml
+	@cp src/opnsense/mvc/app/models/OPNsense/Approuter/Approuter.php \
+		$(PLUGIN_MVC)/models/OPNsense/Approuter/Approuter.php
+	@cp src/opnsense/mvc/app/models/OPNsense/Approuter/Menu/Menu.xml \
+		$(PLUGIN_MVC)/models/OPNsense/Approuter/Menu/Menu.xml
+	@cp src/opnsense/mvc/app/models/OPNsense/Approuter/ACL/ACL.xml \
+		$(PLUGIN_MVC)/models/OPNsense/Approuter/ACL/ACL.xml
 	@# MVC Controllers
-	@mkdir -p $(PLUGIN_MVC)/controllers/OPNsense/AppRouter/Api
-	@mkdir -p $(PLUGIN_MVC)/controllers/OPNsense/AppRouter/forms
-	@cp src/opnsense/mvc/app/controllers/OPNsense/AppRouter/IndexController.php \
-		$(PLUGIN_MVC)/controllers/OPNsense/AppRouter/IndexController.php
-	@cp src/opnsense/mvc/app/controllers/OPNsense/AppRouter/Api/SettingsController.php \
-		$(PLUGIN_MVC)/controllers/OPNsense/AppRouter/Api/SettingsController.php
-	@cp src/opnsense/mvc/app/controllers/OPNsense/AppRouter/Api/ServiceController.php \
-		$(PLUGIN_MVC)/controllers/OPNsense/AppRouter/Api/ServiceController.php
-	@cp src/opnsense/mvc/app/controllers/OPNsense/AppRouter/forms/general.xml \
-		$(PLUGIN_MVC)/controllers/OPNsense/AppRouter/forms/general.xml
-	@cp src/opnsense/mvc/app/controllers/OPNsense/AppRouter/forms/lists.xml \
-		$(PLUGIN_MVC)/controllers/OPNsense/AppRouter/forms/lists.xml
+	@mkdir -p $(PLUGIN_MVC)/controllers/OPNsense/Approuter/Api
+	@mkdir -p $(PLUGIN_MVC)/controllers/OPNsense/Approuter/forms
+	@cp src/opnsense/mvc/app/controllers/OPNsense/Approuter/IndexController.php \
+		$(PLUGIN_MVC)/controllers/OPNsense/Approuter/IndexController.php
+	@cp src/opnsense/mvc/app/controllers/OPNsense/Approuter/Api/SettingsController.php \
+		$(PLUGIN_MVC)/controllers/OPNsense/Approuter/Api/SettingsController.php
+	@cp src/opnsense/mvc/app/controllers/OPNsense/Approuter/Api/ServiceController.php \
+		$(PLUGIN_MVC)/controllers/OPNsense/Approuter/Api/ServiceController.php
+	@cp src/opnsense/mvc/app/controllers/OPNsense/Approuter/forms/general.xml \
+		$(PLUGIN_MVC)/controllers/OPNsense/Approuter/forms/general.xml
+	@cp src/opnsense/mvc/app/controllers/OPNsense/Approuter/forms/lists.xml \
+		$(PLUGIN_MVC)/controllers/OPNsense/Approuter/forms/lists.xml
 	@# MVC Views
-	@mkdir -p $(PLUGIN_MVC)/views/OPNsense/AppRouter
-	@cp src/opnsense/mvc/app/views/OPNsense/AppRouter/index.volt \
-		$(PLUGIN_MVC)/views/OPNsense/AppRouter/index.volt
+	@mkdir -p $(PLUGIN_MVC)/views/OPNsense/Approuter
+	@cp src/opnsense/mvc/app/views/OPNsense/Approuter/index.volt \
+		$(PLUGIN_MVC)/views/OPNsense/Approuter/index.volt
 	@# Backend scripts
 	@mkdir -p $(PLUGIN_SCRIPTS)
-	@cp src/opnsense/scripts/OPNsense/AppRouter/list_updater.py $(PLUGIN_SCRIPTS)/
-	@cp src/opnsense/scripts/OPNsense/AppRouter/dns_watcher.py $(PLUGIN_SCRIPTS)/
-	@cp src/opnsense/scripts/OPNsense/AppRouter/table_manager.sh $(PLUGIN_SCRIPTS)/
-	@cp src/opnsense/scripts/OPNsense/AppRouter/app_categories.json $(PLUGIN_SCRIPTS)/
+	@cp src/opnsense/scripts/OPNsense/Approuter/list_updater.py $(PLUGIN_SCRIPTS)/
+	@cp src/opnsense/scripts/OPNsense/Approuter/dns_watcher.py $(PLUGIN_SCRIPTS)/
+	@cp src/opnsense/scripts/OPNsense/Approuter/table_manager.sh $(PLUGIN_SCRIPTS)/
+	@cp src/opnsense/scripts/OPNsense/Approuter/app_categories.json $(PLUGIN_SCRIPTS)/
 	@chmod +x $(PLUGIN_SCRIPTS)/*.py
 	@chmod +x $(PLUGIN_SCRIPTS)/*.sh
 	@# configd actions
@@ -68,11 +66,11 @@ install-plugin:
 	@cp src/opnsense/service/conf/actions.d/actions_approuter.conf \
 		$(PLUGIN_SERVICE)/conf/actions.d/actions_approuter.conf
 	@# Service templates
-	@mkdir -p $(PLUGIN_SERVICE)/templates/OPNsense/AppRouter
-	@cp src/opnsense/service/templates/OPNsense/AppRouter/+TARGETS \
-		$(PLUGIN_SERVICE)/templates/OPNsense/AppRouter/+TARGETS
-	@cp src/opnsense/service/templates/OPNsense/AppRouter/approuter.conf \
-		$(PLUGIN_SERVICE)/templates/OPNsense/AppRouter/approuter.conf
+	@mkdir -p $(PLUGIN_SERVICE)/templates/OPNsense/Approuter
+	@cp src/opnsense/service/templates/OPNsense/Approuter/+TARGETS \
+		$(PLUGIN_SERVICE)/templates/OPNsense/Approuter/+TARGETS
+	@cp src/opnsense/service/templates/OPNsense/Approuter/approuter.conf \
+		$(PLUGIN_SERVICE)/templates/OPNsense/Approuter/approuter.conf
 	@# Data directories
 	@mkdir -p $(PLUGIN_CONF)/domains
 	@mkdir -p $(PLUGIN_CONF)/cidrs
@@ -87,8 +85,8 @@ activate:
 	@# Flush cached menu to pick up new entries
 	@rm -f /tmp/opnsense_menu_cache.xml 2>/dev/null || true
 	@# Verify PHP syntax
-	@find $(PLUGIN_MVC)/controllers/OPNsense/AppRouter -name '*.php' -exec php -l {} \; 2>&1 | grep -v "No syntax errors" || true
-	@find $(PLUGIN_MVC)/models/OPNsense/AppRouter -name '*.php' -exec php -l {} \; 2>&1 | grep -v "No syntax errors" || true
+	@find $(PLUGIN_MVC)/controllers/OPNsense/Approuter -name '*.php' -exec php -l {} \; 2>&1 | grep -v "No syntax errors" || true
+	@find $(PLUGIN_MVC)/models/OPNsense/Approuter -name '*.php' -exec php -l {} \; 2>&1 | grep -v "No syntax errors" || true
 	@# Restart configd to register new actions
 	@service configd restart 2>/dev/null || echo "Note: configd not running (dev environment?)"
 	@echo ">>> Plugin activated."
@@ -104,15 +102,15 @@ uninstall:
 		/sbin/pfctl -t "$$table" -T flush 2>/dev/null || true; \
 	done
 	@# Remove MVC components
-	@rm -rf $(PLUGIN_MVC)/models/OPNsense/AppRouter
-	@rm -rf $(PLUGIN_MVC)/controllers/OPNsense/AppRouter
-	@rm -rf $(PLUGIN_MVC)/views/OPNsense/AppRouter
+	@rm -rf $(PLUGIN_MVC)/models/OPNsense/Approuter
+	@rm -rf $(PLUGIN_MVC)/controllers/OPNsense/Approuter
+	@rm -rf $(PLUGIN_MVC)/views/OPNsense/Approuter
 	@# Remove backend scripts
 	@rm -rf $(PLUGIN_SCRIPTS)
 	@# Remove configd actions
 	@rm -f $(PLUGIN_SERVICE)/conf/actions.d/actions_approuter.conf
 	@# Remove service templates
-	@rm -rf $(PLUGIN_SERVICE)/templates/OPNsense/AppRouter
+	@rm -rf $(PLUGIN_SERVICE)/templates/OPNsense/Approuter
 	@# Remove plugin hook
 	@rm -f $(PLUGIN_HOOK)/approuter.inc
 	@# Clean caches and runtime state (these cause issues on reinstall)
@@ -140,8 +138,8 @@ clean:
 
 lint:
 	@echo ">>> Checking Python scripts..."
-	@python3 -m py_compile src/opnsense/scripts/OPNsense/AppRouter/list_updater.py
-	@python3 -m py_compile src/opnsense/scripts/OPNsense/AppRouter/dns_watcher.py
+	@python3 -m py_compile src/opnsense/scripts/OPNsense/Approuter/list_updater.py
+	@python3 -m py_compile src/opnsense/scripts/OPNsense/Approuter/dns_watcher.py
 	@echo ">>> Checking XML files..."
 	@find src -name '*.xml' -exec xmllint --noout {} \; 2>/dev/null || echo "(xmllint not available, skipping)"
 	@echo ">>> All checks passed."

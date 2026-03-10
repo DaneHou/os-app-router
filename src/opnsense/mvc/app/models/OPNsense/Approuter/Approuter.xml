@@ -1,5 +1,5 @@
 <model>
-    <mount>//OPNsense/AppRouter</mount>
+    <mount>//OPNsense/Approuter</mount>
     <version>1.0.0</version>
     <description>Application-Aware Routing Plugin</description>
     <items>
