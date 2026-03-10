@@ -239,4 +239,95 @@ class SettingsController extends ApiMutableModelControllerBase
 
         return $result;
     }
+
+    /**
+     * Debug endpoint — shows raw gateway data from all sources.
+     * Access via browser: /api/approuter/settings/debug
+     * DELETE THIS after debugging.
+     */
+    public function debugAction()
+    {
+        $debug = [];
+
+        // 1. configd backend
+        try {
+            $backend = new Backend();
+            $raw = trim($backend->configdpRun('interface routes gateways status'));
+            $debug['configd_raw'] = $raw;
+            $debug['configd_parsed'] = json_decode($raw, true);
+        } catch (\Throwable $e) {
+            $debug['configd_error'] = $e->getMessage();
+        }
+
+        // 2. Routing model
+        try {
+            $gwModel = new \OPNsense\Routing\Gateways();
+            $items = [];
+            foreach ($gwModel->gateway_item->iterateItems() as $uuid => $gw) {
+                $items[$uuid] = [
+                    'name' => (string)$gw->name,
+                    'interface' => (string)$gw->interface,
+                    'gateway' => (string)$gw->gateway,
+                    'descr' => (string)$gw->descr,
+                    'disabled' => (string)$gw->disabled,
+                ];
+            }
+            $debug['routing_model'] = $items;
+        } catch (\Throwable $e) {
+            $debug['routing_model_error'] = $e->getMessage();
+        }
+
+        // 3. Config XML paths
+        $config = Config::getInstance()->object();
+        $debug['has_gateways_node'] = isset($config->gateways);
+        $debug['has_gateways_gateway_item'] = isset($config->gateways->gateway_item);
+        $debug['has_opnsense_gateways'] = isset($config->OPNsense->Gateways);
+        $debug['has_opnsense_gateways_item'] = isset($config->OPNsense->Gateways->gateway_item);
+
+        // Dump legacy gateway items if they exist
+        if (isset($config->gateways->gateway_item)) {
+            $legacy = [];
+            foreach ($config->gateways->gateway_item as $gw) {
+                $item = [];
+                foreach ($gw->children() as $child) {
+                    $item[$child->getName()] = (string)$child;
+                }
+                $legacy[] = $item;
+            }
+            $debug['legacy_gateways'] = $legacy;
+        }
+
+        // Dump OPNsense MVC gateway items if they exist
+        if (isset($config->OPNsense->Gateways)) {
+            $mvc = [];
+            foreach ($config->OPNsense->Gateways->children() as $section) {
+                $sectionName = $section->getName();
+                if ($sectionName === 'gateway_item') {
+                    $item = [];
+                    foreach ($section->children() as $child) {
+                        $item[$child->getName()] = (string)$child;
+                    }
+                    $mvc[] = $item;
+                }
+            }
+            $debug['mvc_gateways'] = $mvc;
+        }
+
+        // 4. Interfaces
+        $ifaces = [];
+        if (isset($config->interfaces)) {
+            foreach ($config->interfaces->children() as $ifname => $iface) {
+                $ifaces[$ifname] = [
+                    'descr' => (string)$iface->descr,
+                    'enable' => (string)$iface->enable,
+                    'ipaddr' => (string)$iface->ipaddr,
+                    'subnet' => (string)$iface->subnet,
+                    'if' => (string)$iface->if,
+                ];
+            }
+        }
+        $debug['interfaces'] = $ifaces;
+
+        return $debug;
+    }
 }
