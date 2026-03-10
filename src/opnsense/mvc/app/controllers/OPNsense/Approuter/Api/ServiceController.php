@@ -127,6 +127,33 @@ class ServiceController extends ApiMutableServiceControllerBase
         }
         $data['pf_tables'] = $tables;
 
+        // Rule match stats — how many packets/bytes each approuter rule has matched
+        $ruleStats = [];
+        exec("/sbin/pfctl -s rules -v 2>/dev/null", $ruleLines);
+        $currentRule = '';
+        foreach ($ruleLines as $line) {
+            if (strpos($line, 'approuter') !== false && strpos($line, 'route-to') !== false) {
+                $currentRule = trim($line);
+            } elseif (!empty($currentRule) && preg_match('/\[\s*Evaluations:\s*(\d+)\s*Packets:\s*(\d+)\s*Bytes:\s*(\d+)/', $line, $m)) {
+                $ruleStats[] = [
+                    'rule' => $currentRule,
+                    'evaluations' => (int)$m[1],
+                    'packets' => (int)$m[2],
+                    'bytes' => (int)$m[3],
+                ];
+                $currentRule = '';
+            }
+        }
+        $data['rule_stats'] = $ruleStats;
+
+        // Recent dns_watcher log entries
+        $logs = [];
+        exec("grep -i 'approuter' /var/log/system.log 2>/dev/null | tail -30", $logLines);
+        foreach ($logLines as $line) {
+            $logs[] = $line;
+        }
+        $data['recent_logs'] = $logs;
+
         return ['status' => 'ok', 'data' => $data];
     }
 }

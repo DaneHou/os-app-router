@@ -136,6 +136,36 @@
                         html += '</table>';
                     }
 
+                    // Rule match stats
+                    if (info.rule_stats && info.rule_stats.length > 0) {
+                        html += '<h4>{{ lang._("Rule Activity") }}</h4>';
+                        html += '<table class="table table-condensed table-striped">';
+                        html += '<thead><tr><th>{{ lang._("Rule") }}</th><th>{{ lang._("Packets") }}</th><th>{{ lang._("Bytes") }}</th></tr></thead>';
+                        for (var i = 0; i < info.rule_stats.length; i++) {
+                            var rs = info.rule_stats[i];
+                            var shortRule = rs.rule.replace(/pass in quick on \S+ route-to \([^)]+\) inet from /, 'from ');
+                            var bytes = rs.bytes;
+                            var bytesStr = bytes > 1073741824 ? (bytes/1073741824).toFixed(1) + ' GB' :
+                                           bytes > 1048576 ? (bytes/1048576).toFixed(1) + ' MB' :
+                                           bytes > 1024 ? (bytes/1024).toFixed(1) + ' KB' : bytes + ' B';
+                            var pktBadge = rs.packets > 0 ?
+                                '<span class="label label-success">' + rs.packets.toLocaleString() + '</span>' :
+                                '<span class="label label-default">0</span>';
+                            html += '<tr><td style="font-size:12px;word-break:break-all">' + shortRule + '</td><td>' + pktBadge + '</td><td>' + bytesStr + '</td></tr>';
+                        }
+                        html += '</table>';
+                    }
+
+                    // Recent logs
+                    if (info.recent_logs && info.recent_logs.length > 0) {
+                        html += '<h4>{{ lang._("Recent Logs") }}</h4>';
+                        html += '<pre style="max-height:300px;overflow-y:auto;font-size:11px">';
+                        for (var i = info.recent_logs.length - 1; i >= 0; i--) {
+                            html += info.recent_logs[i].replace(/</g, '&lt;').replace(/>/g, '&gt;') + '\n';
+                        }
+                        html += '</pre>';
+                    }
+
                     $("#statusInfo").html(html);
                 }
             });

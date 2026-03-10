@@ -143,10 +143,44 @@ def watch_log():
                 log(f"Added {ip} ({domain}) to {table}")
 
 
+def daemonize():
+    """Double-fork to detach from parent process (configd)."""
+    pid = os.fork()
+    if pid > 0:
+        sys.exit(0)  # Parent exits immediately so configd returns
+    os.setsid()
+    pid = os.fork()
+    if pid > 0:
+        sys.exit(0)  # Second parent exits
+    # Redirect stdin/stdout/stderr to /dev/null
+    sys.stdin.close()
+    sys.stdout.close()
+    sys.stderr.close()
+    devnull = os.open(os.devnull, os.O_RDWR)
+    os.dup2(devnull, 0)
+    os.dup2(devnull, 1)
+    os.dup2(devnull, 2)
+
+
 def main():
     action = sys.argv[1] if len(sys.argv) > 1 else "start"
 
     if action == "start":
+        # Stop existing instance if running
+        if os.path.exists(PID_FILE):
+            try:
+                with open(PID_FILE) as f:
+                    old_pid = int(f.read().strip())
+                os.kill(old_pid, signal.SIGTERM)
+                time.sleep(0.5)
+            except (ProcessLookupError, ValueError, OSError):
+                pass
+            try:
+                os.unlink(PID_FILE)
+            except OSError:
+                pass
+
+        daemonize()
         signal.signal(signal.SIGTERM, cleanup)
         signal.signal(signal.SIGINT, cleanup)
         write_pid()

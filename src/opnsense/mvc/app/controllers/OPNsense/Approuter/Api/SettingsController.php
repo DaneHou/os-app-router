@@ -57,36 +57,44 @@ class SettingsController extends ApiMutableModelControllerBase
 
         if (isset($result['rule'])) {
             // Augment gateway: TextField → dropdown options
-            $gwValue = is_string($result['rule']['gateway']) ? $result['rule']['gateway'] : '';
-            $gateways = $this->getGatewaysAction();
-            $gwOptions = ['' => ['value' => '', 'selected' => empty($gwValue) ? 1 : 0]];
-            foreach ($gateways['rows'] as $gw) {
-                $label = $gw['name'];
-                if (!empty($gw['descr'])) {
-                    $label .= ' (' . $gw['descr'] . ')';
+            try {
+                $gwValue = is_string($result['rule']['gateway']) ? $result['rule']['gateway'] : '';
+                $gateways = $this->getGatewaysAction();
+                $gwOptions = ['' => ['value' => '', 'selected' => empty($gwValue) ? 1 : 0]];
+                foreach ($gateways['rows'] as $gw) {
+                    $label = $gw['name'];
+                    if (!empty($gw['descr'])) {
+                        $label .= ' (' . $gw['descr'] . ')';
+                    }
+                    if (!empty($gw['gateway']) && $gw['gateway'] !== 'group') {
+                        $label .= ' [' . $gw['gateway'] . ']';
+                    }
+                    $gwOptions[$gw['name']] = [
+                        'value' => $label,
+                        'selected' => ($gw['name'] === $gwValue) ? 1 : 0,
+                    ];
                 }
-                if (!empty($gw['gateway']) && $gw['gateway'] !== 'group') {
-                    $label .= ' [' . $gw['gateway'] . ']';
-                }
-                $gwOptions[$gw['name']] = [
-                    'value' => $label,
-                    'selected' => ($gw['name'] === $gwValue) ? 1 : 0,
-                ];
+                $result['rule']['gateway'] = $gwOptions;
+            } catch (\Throwable $e) {
+                // Keep gateway as plain text if augmentation fails
             }
-            $result['rule']['gateway'] = $gwOptions;
 
             // Augment categories: CSVListField → select_multiple options
-            $catValue = is_string($result['rule']['categories']) ? $result['rule']['categories'] : '';
-            $catSelected = array_filter(array_map('trim', explode(',', $catValue)));
-            $categories = $this->getCategoriesAction();
-            $catOptions = [];
-            foreach ($categories['rows'] as $cat) {
-                $catOptions[$cat['value']] = [
-                    'value' => $cat['label'],
-                    'selected' => in_array($cat['value'], $catSelected) ? 1 : 0,
-                ];
+            try {
+                $catValue = is_string($result['rule']['categories']) ? $result['rule']['categories'] : '';
+                $catSelected = array_filter(array_map('trim', explode(',', $catValue)));
+                $categories = $this->getCategoriesAction();
+                $catOptions = [];
+                foreach ($categories['rows'] as $cat) {
+                    $catOptions[$cat['value']] = [
+                        'value' => $cat['label'],
+                        'selected' => in_array($cat['value'], $catSelected) ? 1 : 0,
+                    ];
+                }
+                $result['rule']['categories'] = $catOptions;
+            } catch (\Throwable $e) {
+                // Keep categories as plain text if augmentation fails
             }
-            $result['rule']['categories'] = $catOptions;
 
             // sourceNets: plain text field, no augmentation needed
         }
