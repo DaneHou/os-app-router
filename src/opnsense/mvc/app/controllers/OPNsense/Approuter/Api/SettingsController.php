@@ -87,8 +87,25 @@ class SettingsController extends ApiMutableModelControllerBase
             }
             $result['rule']['categories'] = $catOptions;
 
-            // sourceNets: keep as raw CSV string so tokenizer allows free text input
-            // Suggestion options are injected client-side via opnsense_bootgrid_mapped
+            // Augment sourceNets: CSVListField → select_multiple options
+            // Custom input enabled via data-allownew="true" set in index.volt JS
+            $netValue = is_string($result['rule']['sourceNets']) ? $result['rule']['sourceNets'] : '';
+            $netSelected = array_filter(array_map('trim', explode(',', $netValue)));
+            $networks = $this->getNetworksAction();
+            $netOptions = [];
+            foreach ($networks['rows'] as $net) {
+                $netOptions[$net['value']] = [
+                    'value' => $net['label'],
+                    'selected' => in_array($net['value'], $netSelected) ? 1 : 0,
+                ];
+            }
+            // Preserve any user-typed custom values not in predefined list
+            foreach ($netSelected as $val) {
+                if (!empty($val) && !isset($netOptions[$val])) {
+                    $netOptions[$val] = ['value' => $val, 'selected' => 1];
+                }
+            }
+            $result['rule']['sourceNets'] = $netOptions;
         }
 
         return $result;
@@ -158,19 +175,36 @@ class SettingsController extends ApiMutableModelControllerBase
                 $descr = !empty((string)$iface->descr) ? (string)$iface->descr : strtoupper($ifname);
                 $ipaddr = (string)$iface->ipaddr;
                 $subnet = (string)$iface->subnet;
+
+                // Static IP interface
                 if (!empty($ipaddr) && !empty($subnet) && filter_var($ipaddr, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4)) {
                     $netLong = ip2long($ipaddr) & ((-1 << (32 - (int)$subnet)));
                     $network = long2ip($netLong) . '/' . $subnet;
                     $result['rows'][] = [
                         'value' => $network,
-                        'label' => $descr . ' net (' . $network . ')',
+                        'label' => '[' . $descr . '] net (' . $network . ')',
                         'iface' => $ifname,
                     ];
                     $result['rows'][] = [
                         'value' => $ipaddr,
-                        'label' => $descr . ' address (' . $ipaddr . ')',
+                        'label' => '[' . $descr . '] address (' . $ipaddr . ')',
                         'iface' => $ifname,
                     ];
+                } elseif (in_array($ipaddr, ['dhcp', 'pppoe', 'pptp', 'ppp'])) {
+                    // Dynamic interface — try to read actual IP from system
+                    $realif = (string)$iface->if;
+                    $actualIp = '';
+                    $ipFile = '/tmp/' . $realif . '_ip';
+                    if (!empty($realif) && file_exists($ipFile)) {
+                        $actualIp = trim(file_get_contents($ipFile));
+                    }
+                    if (!empty($actualIp) && filter_var($actualIp, FILTER_VALIDATE_IP)) {
+                        $result['rows'][] = [
+                            'value' => $actualIp,
+                            'label' => '[' . $descr . '] address (' . $actualIp . ' / ' . $ipaddr . ')',
+                            'iface' => $ifname,
+                        ];
+                    }
                 }
             }
         }
@@ -202,13 +236,13 @@ class SettingsController extends ApiMutableModelControllerBase
     {
         $result = ['rows' => []];
         $seen = [];
-        $config = Config::getInstance()->object();
 
-        // OPNsense 24.7+ MVC gateway model
-        if (isset($config->OPNsense->Gateways->gateway_item)) {
-            foreach ($config->OPNsense->Gateways->gateway_item as $gw) {
+        // Method 1: Use OPNsense Routing model (24.7+) — the canonical source
+        try {
+            $gwModel = new \OPNsense\Routing\Gateways();
+            foreach ($gwModel->gateway_item->iterateItems() as $uuid => $gw) {
                 $name = (string)$gw->name;
-                if (!empty($name) && !isset($seen[$name])) {
+                if (!empty($name) && (string)$gw->disabled !== '1' && !isset($seen[$name])) {
                     $seen[$name] = true;
                     $result['rows'][] = [
                         'name' => $name,
@@ -218,36 +252,39 @@ class SettingsController extends ApiMutableModelControllerBase
                     ];
                 }
             }
+        } catch (\Throwable $e) {
+            // Model not available on this OPNsense version
         }
 
-        // Legacy gateway format (pre-24.7)
-        if (isset($config->gateways->gateway_item)) {
-            foreach ($config->gateways->gateway_item as $gw) {
-                $name = (string)$gw->name;
-                if (!empty($name) && !isset($seen[$name])) {
-                    $seen[$name] = true;
-                    $result['rows'][] = [
-                        'name' => $name,
-                        'interface' => (string)$gw->interface,
-                        'gateway' => (string)$gw->gateway,
-                        'descr' => (string)$gw->descr,
-                    ];
+        // Method 2: Fallback to config.xml for older versions
+        if (empty($result['rows'])) {
+            $config = Config::getInstance()->object();
+            if (isset($config->gateways->gateway_item)) {
+                foreach ($config->gateways->gateway_item as $gw) {
+                    $name = (string)$gw->name;
+                    if (!empty($name) && !isset($seen[$name])) {
+                        $seen[$name] = true;
+                        $result['rows'][] = [
+                            'name' => $name,
+                            'interface' => (string)$gw->interface,
+                            'gateway' => (string)$gw->gateway,
+                            'descr' => (string)$gw->descr,
+                        ];
+                    }
                 }
             }
-        }
-
-        // Gateway groups
-        if (isset($config->gateways->gateway_group)) {
-            foreach ($config->gateways->gateway_group as $gwg) {
-                $name = (string)$gwg->name;
-                if (!empty($name) && !isset($seen[$name])) {
-                    $seen[$name] = true;
-                    $result['rows'][] = [
-                        'name' => $name,
-                        'interface' => '',
-                        'gateway' => 'group',
-                        'descr' => (string)$gwg->descr . ' (group)',
-                    ];
+            if (isset($config->gateways->gateway_group)) {
+                foreach ($config->gateways->gateway_group as $gwg) {
+                    $name = (string)$gwg->name;
+                    if (!empty($name) && !isset($seen[$name])) {
+                        $seen[$name] = true;
+                        $result['rows'][] = [
+                            'name' => $name,
+                            'interface' => '',
+                            'gateway' => 'group',
+                            'descr' => (string)$gwg->descr . ' (group)',
+                        ];
+                    }
                 }
             }
         }

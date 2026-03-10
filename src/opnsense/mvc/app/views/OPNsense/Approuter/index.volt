@@ -19,44 +19,9 @@
 
 <script>
     $( document ).ready(function() {
-        // Cache network options for source field suggestions
-        var networkCache = [];
-        ajaxGet(url="/api/approuter/settings/getNetworks", sendData={}, callback=function(data, status) {
-            if (data && data.rows) {
-                networkCache = data.rows;
-            }
-        });
-
-        // After dialog data is mapped, inject source suggestions filtered by interface
-        $('#DialogRule').on('opnsense_bootgrid_mapped', function() {
-            var $src = $('#rule\\.sourceNets');
-            var $iface = $('#rule\\.interface');
-
-            function updateSourceSuggestions() {
-                var selectedIface = $iface.val();
-                // Remember currently selected/typed values
-                var currentVals = $src.val() || [];
-                if (typeof currentVals === 'string') {
-                    currentVals = currentVals.split(',').map(function(s) { return s.trim(); }).filter(Boolean);
-                }
-                // Remove non-selected options (suggestions only)
-                $src.find('option:not(:selected)').remove();
-                // Add filtered suggestions
-                $.each(networkCache, function(idx, net) {
-                    if (net.iface === '*' || net.iface === selectedIface || !selectedIface) {
-                        if ($src.find('option[value="' + net.value + '"]').length === 0) {
-                            $src.append($('<option>').val(net.value).text(net.label));
-                        }
-                    }
-                });
-            }
-
-            updateSourceSuggestions();
-            // Re-filter when interface changes
-            $iface.off('change.approuter').on('change.approuter', function() {
-                updateSourceSuggestions();
-            });
-        });
+        // Enable custom input for Source field (type any IP/subnet + predefined suggestions)
+        // Must be set BEFORE tokenize2 initializes on the element
+        $('#rule\\.sourceNets').attr('data-allownew', 'true');
 
         // Both forms share the same model endpoint - load once, populate both
         var data_get_map = {
