@@ -19,53 +19,43 @@
 
 <script>
     $( document ).ready(function() {
-        // Cache gateway and category options for dialog population
-        var gatewayOptions = [];
-        var categoryOptions = [];
-
-        // Fetch gateways
+        // Populate gateway dropdown immediately when data arrives
+        // (must be in DOM before UIBootgrid maps rule data, or value is lost)
         ajaxGet(url="/api/approuter/settings/getGateways", sendData={}, callback=function(data, status) {
             if (data && data.rows) {
-                gatewayOptions = data.rows;
+                var $gw = $('#rule\\.gateway');
+                $gw.empty();
+                $gw.append($('<option>').val('').text(''));
+                $.each(data.rows, function(idx, gw) {
+                    var label = gw.name;
+                    if (gw.descr) label += ' (' + gw.descr + ')';
+                    if (gw.gateway && gw.gateway !== 'group') label += ' [' + gw.gateway + ']';
+                    $gw.append($('<option>').val(gw.name).text(label));
+                });
+                try { $gw.selectpicker('refresh'); } catch(e) {}
             }
         });
 
-        // Fetch categories
+        // Populate categories select with searchable app options
         ajaxGet(url="/api/approuter/settings/getCategories", sendData={}, callback=function(data, status) {
             if (data && data.rows) {
-                categoryOptions = data.rows;
+                var $cat = $('#rule\\.categories');
+                $.each(data.rows, function(idx, opt) {
+                    $cat.append($('<option>').val(opt.value).text(opt.label));
+                });
+                try { $cat.selectpicker('refresh'); } catch(e) {}
             }
         });
 
-        // Populate gateway dropdown and categories tokenizer before dialog opens
-        $('#DialogRule').on('opnsense_bootgrid_mapped', function(e) {
-            // Populate gateway dropdown
-            var $gw = $('#rule\\.gateway');
-            var currentVal = $gw.val();
-            $gw.empty();
-            $gw.append($('<option>').val('').text('--- Select Gateway ---'));
-            $.each(gatewayOptions, function(idx, gw) {
-                var label = gw.name;
-                if (gw.descr) label += ' (' + gw.descr + ')';
-                if (gw.gateway && gw.gateway !== 'group') label += ' [' + gw.gateway + ']';
-                $gw.append($('<option>').val(gw.name).text(label));
-            });
-            if (currentVal) {
-                $gw.val(currentVal);
+        // Populate source networks with interface suggestions
+        ajaxGet(url="/api/approuter/settings/getNetworks", sendData={}, callback=function(data, status) {
+            if (data && data.rows) {
+                var $nets = $('#rule\\.sourceNets');
+                $.each(data.rows, function(idx, net) {
+                    $nets.append($('<option>').val(net.value).text(net.label));
+                });
+                try { $nets.selectpicker('refresh'); } catch(e) {}
             }
-            $gw.selectpicker('refresh');
-
-            // Populate categories tokenizer
-            var $cat = $('#rule\\.categories');
-            var currentCats = $cat.val();
-            $cat.empty();
-            $.each(categoryOptions, function(idx, opt) {
-                $cat.append($('<option>').val(opt.value).text(opt.label));
-            });
-            if (currentCats) {
-                $cat.val(currentCats);
-            }
-            $cat.selectpicker('refresh');
         });
 
         // Both forms share the same model endpoint - load once, populate both
@@ -186,7 +176,7 @@
                     <th data-column-id="uuid" data-type="string" data-identifier="true" data-visible="false">{{ lang._('ID') }}</th>
                     <th data-column-id="enabled" data-width="6em" data-type="string" data-formatter="rowtoggle">{{ lang._('Enabled') }}</th>
                     <th data-column-id="description" data-type="string">{{ lang._('Description') }}</th>
-                    <th data-column-id="sourceNets" data-type="string">{{ lang._('Source Networks') }}</th>
+                    <th data-column-id="sourceNets" data-type="string">{{ lang._('Source') }}</th>
                     <th data-column-id="categories" data-type="string">{{ lang._('Categories') }}</th>
                     <th data-column-id="gateway" data-type="string">{{ lang._('Gateway') }}</th>
                     <th data-column-id="interface" data-type="string">{{ lang._('Interface') }}</th>
@@ -254,10 +244,10 @@
     [
         {'id': 'rule.enabled', 'label': lang._('Enabled'), 'type': 'checkbox'},
         {'id': 'rule.description', 'label': lang._('Description'), 'type': 'text'},
-        {'id': 'rule.sourceNets', 'label': lang._('Source Networks'), 'type': 'select_multiple', 'help': lang._('Type IP addresses or subnets (e.g. 192.168.1.0/24) and press Enter')},
-        {'id': 'rule.categories', 'label': lang._('App Categories'), 'type': 'select_multiple', 'help': lang._('Search and select app categories or individual apps (e.g. type "爱" to find iQIYI)')},
-        {'id': 'rule.gateway', 'label': lang._('Gateway'), 'type': 'dropdown', 'help': lang._('Select target gateway for routing')},
-        {'id': 'rule.interface', 'label': lang._('Interface'), 'type': 'dropdown', 'help': lang._('Inbound interface (usually LAN)')}
+        {'id': 'rule.interface', 'label': lang._('Interface'), 'type': 'dropdown', 'help': lang._('Inbound interface')},
+        {'id': 'rule.sourceNets', 'label': lang._('Source'), 'type': 'select_multiple', 'help': lang._('Select "any" for all traffic, or choose interface nets / type specific IPs')},
+        {'id': 'rule.categories', 'label': lang._('App Categories'), 'type': 'select_multiple', 'help': lang._('Search and select app categories or individual apps')},
+        {'id': 'rule.gateway', 'label': lang._('Gateway'), 'type': 'dropdown', 'help': lang._('Target gateway for routing')}
     ],
     'id':'DialogRule',
     'label':lang._('Edit Routing Rule')

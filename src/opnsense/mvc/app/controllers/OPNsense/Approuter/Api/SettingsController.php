@@ -102,30 +102,115 @@ class SettingsController extends ApiMutableModelControllerBase
         return $result;
     }
 
+    public function getNetworksAction()
+    {
+        $result = ['rows' => []];
+
+        // "any" = all traffic
+        $result['rows'][] = ['value' => 'any', 'label' => 'any'];
+
+        $config = Config::getInstance()->object();
+        if (isset($config->interfaces)) {
+            foreach ($config->interfaces->children() as $ifname => $iface) {
+                $enabled = (string)$iface->enable;
+                if (empty($enabled) && !in_array($ifname, ['lan', 'wan'])) {
+                    continue;
+                }
+                $descr = !empty((string)$iface->descr) ? (string)$iface->descr : strtoupper($ifname);
+                $ipaddr = (string)$iface->ipaddr;
+                $subnet = (string)$iface->subnet;
+                if (!empty($ipaddr) && !empty($subnet) && filter_var($ipaddr, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4)) {
+                    $netLong = ip2long($ipaddr) & ((-1 << (32 - (int)$subnet)));
+                    $network = long2ip($netLong) . '/' . $subnet;
+                    $result['rows'][] = [
+                        'value' => $network,
+                        'label' => $descr . ' net (' . $network . ')',
+                    ];
+                    // Also add single interface address
+                    $result['rows'][] = [
+                        'value' => $ipaddr . '/32',
+                        'label' => $descr . ' address (' . $ipaddr . ')',
+                    ];
+                }
+            }
+        }
+
+        // Firewall aliases
+        if (isset($config->OPNsense->Firewall->Alias->aliases->alias)) {
+            foreach ($config->OPNsense->Firewall->Alias->aliases->alias as $alias) {
+                $atype = (string)$alias->type;
+                if (in_array($atype, ['host', 'network'])) {
+                    $aname = (string)$alias->name;
+                    $adescr = (string)$alias->description;
+                    $label = $aname;
+                    if ($adescr) {
+                        $label .= ' (' . $adescr . ')';
+                    }
+                    $result['rows'][] = [
+                        'value' => $aname,
+                        'label' => $label,
+                    ];
+                }
+            }
+        }
+
+        return $result;
+    }
+
     public function getGatewaysAction()
     {
         $result = ['rows' => []];
+        $seen = [];
         $config = Config::getInstance()->object();
+
+        // OPNsense 24.7+ MVC gateway model
+        if (isset($config->OPNsense->Gateways->gateway_item)) {
+            foreach ($config->OPNsense->Gateways->gateway_item as $gw) {
+                $name = (string)$gw->name;
+                if (!empty($name) && !isset($seen[$name])) {
+                    $seen[$name] = true;
+                    $result['rows'][] = [
+                        'name' => $name,
+                        'interface' => (string)$gw->interface,
+                        'gateway' => (string)$gw->gateway,
+                        'descr' => (string)$gw->descr,
+                    ];
+                }
+            }
+        }
+
+        // Legacy gateway format (pre-24.7)
         if (isset($config->gateways->gateway_item)) {
             foreach ($config->gateways->gateway_item as $gw) {
-                $result['rows'][] = [
-                    'name' => (string)$gw->name,
-                    'interface' => (string)$gw->interface,
-                    'gateway' => (string)$gw->gateway,
-                    'descr' => (string)$gw->descr,
-                ];
+                $name = (string)$gw->name;
+                if (!empty($name) && !isset($seen[$name])) {
+                    $seen[$name] = true;
+                    $result['rows'][] = [
+                        'name' => $name,
+                        'interface' => (string)$gw->interface,
+                        'gateway' => (string)$gw->gateway,
+                        'descr' => (string)$gw->descr,
+                    ];
+                }
             }
         }
+
+        // Gateway groups
         if (isset($config->gateways->gateway_group)) {
             foreach ($config->gateways->gateway_group as $gwg) {
-                $result['rows'][] = [
-                    'name' => (string)$gwg->name,
-                    'interface' => '',
-                    'gateway' => 'group',
-                    'descr' => (string)$gwg->descr . ' (group)',
-                ];
+                $name = (string)$gwg->name;
+                if (!empty($name) && !isset($seen[$name])) {
+                    $seen[$name] = true;
+                    $result['rows'][] = [
+                        'name' => $name,
+                        'interface' => '',
+                        'gateway' => 'group',
+                        'descr' => (string)$gwg->descr . ' (group)',
+                    ];
+                }
             }
         }
+
         return $result;
     }
 }

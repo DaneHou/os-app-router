@@ -96,11 +96,18 @@ function approuter_firewall(\OPNsense\Firewall\Plugin $fw)
             continue;
         }
 
-        $clientTableName = $tablePrefix . '_clients_' . substr(md5($rule['uuid']), 0, 8);
-        $fw->registerTable($clientTableName, [
-            'content' => $sourceNets,
-            'persist' => true,
-        ]);
+        // Check if source is "any"
+        $isAny = (count($sourceNets) === 1 && strtolower($sourceNets[0]) === 'any');
+
+        $fromClause = 'any';
+        if (!$isAny) {
+            $clientTableName = $tablePrefix . '_clients_' . substr(md5($rule['uuid']), 0, 8);
+            $fw->registerTable($clientTableName, [
+                'content' => $sourceNets,
+                'persist' => true,
+            ]);
+            $fromClause = '<' . $clientTableName . '>';
+        }
 
         foreach ($rule['categories'] as $category) {
             $category = trim($category);
@@ -114,7 +121,7 @@ function approuter_firewall(\OPNsense\Firewall\Plugin $fw)
             $fw->registerFilterRule(
                 $priority,
                 [
-                    'from' => '<' . $clientTableName . '>',
+                    'from' => $fromClause,
                     'to' => '<' . $tableName . '>',
                     'gateway' => $rule['gateway'],
                     'direction' => 'in',
