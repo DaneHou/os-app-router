@@ -42,7 +42,7 @@ class ServiceController extends ApiMutableServiceControllerBase
     {
         $status = "failed";
         if ($this->request->isPost()) {
-            $this->sessionClose();
+            session_write_close();
             $backend = new Backend();
             $backend->configdRun('template reload OPNsense/Approuter');
             $backend->configdRun('approuter generate_dns');
@@ -60,7 +60,7 @@ class ServiceController extends ApiMutableServiceControllerBase
     {
         $status = "failed";
         if ($this->request->isPost()) {
-            $this->sessionClose();
+            session_write_close();
             $backend = new Backend();
             $backend->configdRun('approuter update_lists');
             $status = "ok";
@@ -72,7 +72,7 @@ class ServiceController extends ApiMutableServiceControllerBase
     {
         $status = "failed";
         if ($this->request->isPost()) {
-            $this->sessionClose();
+            session_write_close();
             $backend = new Backend();
             $backend->configdRun('approuter force_update');
             $status = "ok";

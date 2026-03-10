@@ -19,45 +19,6 @@
 
 <script>
     $( document ).ready(function() {
-        // Populate gateway dropdown immediately when data arrives
-        // (must be in DOM before UIBootgrid maps rule data, or value is lost)
-        ajaxGet(url="/api/approuter/settings/getGateways", sendData={}, callback=function(data, status) {
-            if (data && data.rows) {
-                var $gw = $('#rule\\.gateway');
-                $gw.empty();
-                $gw.append($('<option>').val('').text(''));
-                $.each(data.rows, function(idx, gw) {
-                    var label = gw.name;
-                    if (gw.descr) label += ' (' + gw.descr + ')';
-                    if (gw.gateway && gw.gateway !== 'group') label += ' [' + gw.gateway + ']';
-                    $gw.append($('<option>').val(gw.name).text(label));
-                });
-                try { $gw.selectpicker('refresh'); } catch(e) {}
-            }
-        });
-
-        // Populate categories select with searchable app options
-        ajaxGet(url="/api/approuter/settings/getCategories", sendData={}, callback=function(data, status) {
-            if (data && data.rows) {
-                var $cat = $('#rule\\.categories');
-                $.each(data.rows, function(idx, opt) {
-                    $cat.append($('<option>').val(opt.value).text(opt.label));
-                });
-                try { $cat.selectpicker('refresh'); } catch(e) {}
-            }
-        });
-
-        // Populate source networks with interface suggestions
-        ajaxGet(url="/api/approuter/settings/getNetworks", sendData={}, callback=function(data, status) {
-            if (data && data.rows) {
-                var $nets = $('#rule\\.sourceNets');
-                $.each(data.rows, function(idx, net) {
-                    $nets.append($('<option>').val(net.value).text(net.label));
-                });
-                try { $nets.selectpicker('refresh'); } catch(e) {}
-            }
-        });
-
         // Both forms share the same model endpoint - load once, populate both
         var data_get_map = {
             'frm_GeneralSettings': "/api/approuter/settings/get",

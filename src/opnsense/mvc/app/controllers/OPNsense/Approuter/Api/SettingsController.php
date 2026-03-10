@@ -52,7 +52,62 @@ class SettingsController extends ApiMutableModelControllerBase
 
     public function getRuleAction($uuid = null)
     {
-        return $this->getBase('rule', 'rules.rule', $uuid);
+        $result = $this->getBase('rule', 'rules.rule', $uuid);
+
+        if (isset($result['rule'])) {
+            // Augment gateway: TextField → dropdown options
+            $gwValue = is_string($result['rule']['gateway']) ? $result['rule']['gateway'] : '';
+            $gateways = $this->getGatewaysAction();
+            $gwOptions = ['' => ['value' => '', 'selected' => empty($gwValue) ? 1 : 0]];
+            foreach ($gateways['rows'] as $gw) {
+                $label = $gw['name'];
+                if (!empty($gw['descr'])) {
+                    $label .= ' (' . $gw['descr'] . ')';
+                }
+                if (!empty($gw['gateway']) && $gw['gateway'] !== 'group') {
+                    $label .= ' [' . $gw['gateway'] . ']';
+                }
+                $gwOptions[$gw['name']] = [
+                    'value' => $label,
+                    'selected' => ($gw['name'] === $gwValue) ? 1 : 0,
+                ];
+            }
+            $result['rule']['gateway'] = $gwOptions;
+
+            // Augment categories: CSVListField → select_multiple options
+            $catValue = is_string($result['rule']['categories']) ? $result['rule']['categories'] : '';
+            $catSelected = array_filter(array_map('trim', explode(',', $catValue)));
+            $categories = $this->getCategoriesAction();
+            $catOptions = [];
+            foreach ($categories['rows'] as $cat) {
+                $catOptions[$cat['value']] = [
+                    'value' => $cat['label'],
+                    'selected' => in_array($cat['value'], $catSelected) ? 1 : 0,
+                ];
+            }
+            $result['rule']['categories'] = $catOptions;
+
+            // Augment sourceNets: CSVListField → select_multiple options
+            $netValue = is_string($result['rule']['sourceNets']) ? $result['rule']['sourceNets'] : '';
+            $netSelected = array_filter(array_map('trim', explode(',', $netValue)));
+            $networks = $this->getNetworksAction();
+            $netOptions = [];
+            foreach ($networks['rows'] as $net) {
+                $netOptions[$net['value']] = [
+                    'value' => $net['label'],
+                    'selected' => in_array($net['value'], $netSelected) ? 1 : 0,
+                ];
+            }
+            // Add any custom values not in predefined list
+            foreach ($netSelected as $val) {
+                if (!empty($val) && !isset($netOptions[$val])) {
+                    $netOptions[$val] = ['value' => $val, 'selected' => 1];
+                }
+            }
+            $result['rule']['sourceNets'] = $netOptions;
+        }
+
+        return $result;
     }
 
     public function addRuleAction()
