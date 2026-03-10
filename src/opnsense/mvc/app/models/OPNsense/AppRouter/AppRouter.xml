@@ -1,0 +1,92 @@
+<model>
+    <mount>//OPNsense/AppRouter</mount>
+    <version>1.0.0</version>
+    <description>Application-Aware Routing Plugin</description>
+    <items>
+        <general>
+            <enabled type="BooleanField">
+                <Default>0</Default>
+                <Required>Y</Required>
+            </enabled>
+            <dnsResolver type="OptionField">
+                <Default>dnsmasq</Default>
+                <OptionValues>
+                    <dnsmasq>Dnsmasq (ipset)</dnsmasq>
+                    <unbound>Unbound (log watcher)</unbound>
+                </OptionValues>
+                <Required>Y</Required>
+            </dnsResolver>
+            <updateInterval type="OptionField">
+                <Default>daily</Default>
+                <OptionValues>
+                    <hourly>Every Hour</hourly>
+                    <daily>Daily</daily>
+                    <weekly>Weekly</weekly>
+                </OptionValues>
+                <Required>Y</Required>
+            </updateInterval>
+            <tablePrefix type="TextField">
+                <Default>approuter</Default>
+                <Required>Y</Required>
+                <Mask>/^[a-z][a-z0-9_]{0,30}$/</Mask>
+                <ValidationMessage>Use lowercase letters, numbers and underscores only</ValidationMessage>
+            </tablePrefix>
+        </general>
+        <rules>
+            <rule type="ArrayField">
+                <enabled type="BooleanField">
+                    <Default>1</Default>
+                    <Required>Y</Required>
+                </enabled>
+                <description type="TextField">
+                    <Required>N</Required>
+                </description>
+                <sourceNets type="NetworkField">
+                    <Required>Y</Required>
+                    <FieldSeparator>,</FieldSeparator>
+                    <asList>Y</asList>
+                    <WildcardEnabled>N</WildcardEnabled>
+                </sourceNets>
+                <categories type="OptionField">
+                    <Multiple>Y</Multiple>
+                    <FieldSeparator>,</FieldSeparator>
+                    <OptionValues>
+                        <video>China Video</video>
+                        <social>China Social</social>
+                        <shopping>China Shopping</shopping>
+                        <music>China Music</music>
+                        <gaming>China Gaming</gaming>
+                        <china_all>All China Traffic</china_all>
+                    </OptionValues>
+                    <Required>Y</Required>
+                </categories>
+                <gateway type="TextField">
+                    <Required>Y</Required>
+                </gateway>
+                <interface type="InterfaceField">
+                    <Required>Y</Required>
+                    <Default>lan</Default>
+                    <Filters>
+                        <enable>/^(?!loopback).*$/</enable>
+                    </Filters>
+                </interface>
+            </rule>
+        </rules>
+        <lists>
+            <chinaDomainUrl type="UrlField">
+                <Default>https://raw.githubusercontent.com/felixonmars/dnsmasq-china-list/master/accelerated-domains.china.conf</Default>
+                <Required>N</Required>
+            </chinaDomainUrl>
+            <chinaCidrUrl type="UrlField">
+                <Default>https://raw.githubusercontent.com/ruijzhan/chnroute/master/chnroute.txt</Default>
+                <Required>N</Required>
+            </chinaCidrUrl>
+            <customDomains type="TextField">
+                <Required>N</Required>
+            </customDomains>
+            <customCidrs type="TextField">
+                <Required>N</Required>
+            </customCidrs>
+        </lists>
+    </items>
+</model>

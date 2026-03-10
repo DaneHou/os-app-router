@@ -1,0 +1,9 @@
+<acl>
+    <page-approuter>
+        <name>WebCfg - AppRouter settings</name>
+        <patterns>
+            <pattern>ui/approuter/*</pattern>
+            <pattern>api/approuter/*</pattern>
+        </patterns>
+    </page-approuter>
+</acl>

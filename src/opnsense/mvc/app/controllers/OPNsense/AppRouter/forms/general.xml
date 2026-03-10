@@ -1,0 +1,26 @@
+<form>
+    <field>
+        <id>approuter.general.enabled</id>
+        <label>Enable AppRouter</label>
+        <type>checkbox</type>
+        <help>Enable application-aware routing</help>
+    </field>
+    <field>
+        <id>approuter.general.dnsResolver</id>
+        <label>DNS Resolver</label>
+        <type>dropdown</type>
+        <help>Select which DNS resolver to integrate with. Dnsmasq uses native ipset support. Unbound uses a log-watching daemon.</help>
+    </field>
+    <field>
+        <id>approuter.general.updateInterval</id>
+        <label>List Update Interval</label>
+        <type>dropdown</type>
+        <help>How often to fetch updated domain and CIDR lists from remote sources.</help>
+    </field>
+    <field>
+        <id>approuter.general.tablePrefix</id>
+        <label>Table Prefix</label>
+        <type>text</type>
+        <help>Prefix for pf table names (default: approuter). Tables will be named prefix_category.</help>
+    </field>
+</form>

@@ -1,0 +1,26 @@
+<form>
+    <field>
+        <id>approuter.lists.chinaDomainUrl</id>
+        <label>China Domain List URL</label>
+        <type>text</type>
+        <help>URL to fetch Chinese domain list in dnsmasq format (e.g., felixonmars/dnsmasq-china-list)</help>
+    </field>
+    <field>
+        <id>approuter.lists.chinaCidrUrl</id>
+        <label>China CIDR List URL</label>
+        <type>text</type>
+        <help>URL to fetch Chinese IP CIDR list (e.g., chnroute)</help>
+    </field>
+    <field>
+        <id>approuter.lists.customDomains</id>
+        <label>Custom Domains</label>
+        <type>textbox</type>
+        <help>Additional domains to route (one per line). These will be added to all enabled categories.</help>
+    </field>
+    <field>
+        <id>approuter.lists.customCidrs</id>
+        <label>Custom CIDRs</label>
+        <type>textbox</type>
+        <help>Additional CIDR ranges to route (one per line, e.g., 1.2.3.0/24).</help>
+    </field>
+</form>

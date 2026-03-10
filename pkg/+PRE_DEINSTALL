@@ -1,0 +1,11 @@
+#!/bin/sh
+
+# Stop DNS watcher if running
+if [ -f /var/run/approuter_dns_watcher.pid ]; then
+    /usr/local/opnsense/scripts/OPNsense/AppRouter/dns_watcher.py stop 2>/dev/null || true
+fi
+
+# Flush pf tables to remove stale routing state
+/sbin/pfctl -s Tables 2>/dev/null | grep "^approuter_" | while read table; do
+    /sbin/pfctl -t "$table" -T flush 2>/dev/null || true
+done

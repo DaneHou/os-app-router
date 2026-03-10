@@ -1,0 +1,9 @@
+Application-aware routing plugin for OPNsense.
+
+Routes traffic from specific LAN clients through designated gateways
+based on application categories (e.g., Chinese video, social media,
+shopping). Uses DNS-based identification (Dnsmasq ipset / Unbound
+log watching) combined with CIDR lists for accurate application
+traffic classification.
+
+WWW: https://github.com/DaneHou/os-app-router

@@ -1,0 +1,23 @@
+#!/bin/sh
+
+# Clean caches and generated data (these can cause issues on reinstall)
+rm -rf /usr/local/etc/app-router/dnsmasq.d
+rm -rf /usr/local/etc/app-router/unbound.d
+rm -rf /usr/local/etc/app-router/domains
+rm -rf /usr/local/etc/app-router/cidrs
+rm -f /usr/local/etc/app-router/state.json
+rm -rf /var/run/approuter
+rm -f /var/run/approuter_dns_watcher.pid
+rm -rf /tmp/approuter
+rm -f /tmp/opnsense_menu_cache.xml 2>/dev/null
+
+# Preserve config.json (user settings) so reinstall picks up old config
+# User can manually: rm -rf /usr/local/etc/app-router
+
+# Restart configd to deregister actions
+if [ -f /var/run/configd.pid ]; then
+    service configd restart
+fi
+
+# Reload firewall to remove injected rules
+configctl filter reload 2>/dev/null || true

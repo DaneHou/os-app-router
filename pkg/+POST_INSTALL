@@ -1,0 +1,19 @@
+#!/bin/sh
+
+# Create data directories
+mkdir -p /usr/local/etc/app-router/domains
+mkdir -p /usr/local/etc/app-router/cidrs
+mkdir -p /usr/local/etc/app-router/dnsmasq.d
+mkdir -p /usr/local/etc/app-router/unbound.d
+mkdir -p /var/run/approuter
+
+# Set script permissions
+chmod +x /usr/local/opnsense/scripts/OPNsense/AppRouter/*.py 2>/dev/null || true
+chmod +x /usr/local/opnsense/scripts/OPNsense/AppRouter/*.sh 2>/dev/null || true
+
+# Restart configd to pick up new actions
+if [ -f /var/run/configd.pid ]; then
+    service configd restart
+fi
+
+echo "os-app-router installed. Navigate to Firewall > AppRouter in the web UI."
