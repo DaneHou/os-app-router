@@ -30,7 +30,6 @@ namespace OPNsense\Approuter\Api;
 
 use OPNsense\Base\ApiMutableModelControllerBase;
 use OPNsense\Core\Backend;
-use OPNsense\Routing\Gateways;
 
 class SettingsController extends ApiMutableModelControllerBase
 {
@@ -56,22 +55,40 @@ class SettingsController extends ApiMutableModelControllerBase
         $result = $this->getBase('rule', 'rules.rule', $uuid);
 
         if (isset($result['rule'])) {
-            // Augment gateway: TextField → dropdown options
+            // Augment gateway: TextField → dropdown options (lightweight, no configd)
             try {
                 $gwValue = is_string($result['rule']['gateway']) ? $result['rule']['gateway'] : '';
-                $gateways = $this->getGatewaysAction();
-                $gwOptions = ['' => ['value' => '', 'selected' => empty($gwValue) ? 1 : 0]];
-                foreach ($gateways['rows'] as $gw) {
-                    $label = $gw['name'];
-                    if (!empty($gw['descr'])) {
-                        $label .= ' (' . $gw['descr'] . ')';
+                $gwOptions = ['' => ['value' => '(none)', 'selected' => empty($gwValue) ? 1 : 0]];
+                // Use Routing model directly — fast PHP-only call, no configd socket
+                $gwModel = new \OPNsense\Routing\Gateways();
+                foreach ($gwModel->gateway_item->iterateItems() as $gwUuid => $gw) {
+                    if ((string)$gw->disabled === '1') {
+                        continue;
                     }
-                    if (!empty($gw['gateway']) && $gw['gateway'] !== 'group') {
-                        $label .= ' [' . $gw['gateway'] . ']';
+                    $name = (string)$gw->name;
+                    if (empty($name)) {
+                        continue;
                     }
-                    $gwOptions[$gw['name']] = [
+                    $label = $name;
+                    $descr = (string)$gw->descr;
+                    $addr = (string)$gw->gateway;
+                    if (!empty($descr)) {
+                        $label .= ' (' . $descr . ')';
+                    }
+                    if (!empty($addr)) {
+                        $label .= ' [' . $addr . ']';
+                    }
+                    $gwOptions[$name] = [
                         'value' => $label,
-                        'selected' => ($gw['name'] === $gwValue) ? 1 : 0,
+                        'selected' => ($name === $gwValue) ? 1 : 0,
+                    ];
+                }
+                // If the currently selected gateway isn't in the model (e.g. dynamic gateway),
+                // add it so it still shows as selected
+                if (!empty($gwValue) && !isset($gwOptions[$gwValue])) {
+                    $gwOptions[$gwValue] = [
+                        'value' => $gwValue,
+                        'selected' => 1,
                     ];
                 }
                 $result['rule']['gateway'] = $gwOptions;
@@ -184,7 +201,7 @@ class SettingsController extends ApiMutableModelControllerBase
         // Fallback: Routing model (if configd didn't return results)
         if (empty($result['rows'])) {
             try {
-                $gwModel = new Gateways();
+                $gwModel = new \OPNsense\Routing\Gateways();
                 foreach ($gwModel->gateway_item->iterateItems() as $uuid => $gw) {
                     if ((string)$gw->disabled === '1') {
                         continue;

@@ -82,13 +82,18 @@ install-plugin:
 
 activate:
 	@echo ">>> Activating plugin..."
-	@# Flush cached menu to pick up new entries
+	@# Flush all caches so changes take effect
 	@rm -f /tmp/opnsense_menu_cache.xml 2>/dev/null || true
+	@rm -f /tmp/*.cache 2>/dev/null || true
+	@rm -rf /tmp/opnsense_volt_templates 2>/dev/null || true
+	@rm -rf /var/cache/opnsense 2>/dev/null || true
 	@# Verify PHP syntax
 	@find $(PLUGIN_MVC)/controllers/OPNsense/Approuter -name '*.php' -exec php -l {} \; 2>&1 | grep -v "No syntax errors" || true
 	@find $(PLUGIN_MVC)/models/OPNsense/Approuter -name '*.php' -exec php -l {} \; 2>&1 | grep -v "No syntax errors" || true
 	@# Restart configd to register new actions
 	@service configd restart 2>/dev/null || echo "Note: configd not running (dev environment?)"
+	@# Restart php-fpm to clear opcache (ensures new PHP code is loaded)
+	@service php-fpm restart 2>/dev/null || true
 	@echo ">>> Plugin activated."
 
 uninstall:
