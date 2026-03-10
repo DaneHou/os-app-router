@@ -30,7 +30,7 @@ namespace OPNsense\Approuter\Api;
 
 use OPNsense\Base\ApiMutableModelControllerBase;
 use OPNsense\Core\Backend;
-use OPNsense\Core\Config;
+use OPNsense\Routing\Gateways;
 
 class SettingsController extends ApiMutableModelControllerBase
 {
@@ -141,193 +141,62 @@ class SettingsController extends ApiMutableModelControllerBase
         return $result;
     }
 
-    public function getNetworksAction()
+    public function getGatewaysAction()
     {
         $result = ['rows' => []];
+        $seen = [];
 
-        // "any" = all traffic (always shown regardless of interface)
-        $result['rows'][] = ['value' => 'any', 'label' => 'any', 'iface' => '*'];
-
-        $config = Config::getInstance()->object();
-        if (isset($config->interfaces)) {
-            foreach ($config->interfaces->children() as $ifname => $iface) {
-                $enabled = (string)$iface->enable;
-                if (empty($enabled) && !in_array($ifname, ['lan', 'wan'])) {
-                    continue;
-                }
-                $descr = !empty((string)$iface->descr) ? (string)$iface->descr : strtoupper($ifname);
-                $ipaddr = (string)$iface->ipaddr;
-                $subnet = (string)$iface->subnet;
-
-                // Static IP interface
-                if (!empty($ipaddr) && !empty($subnet) && filter_var($ipaddr, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4)) {
-                    $netLong = ip2long($ipaddr) & ((-1 << (32 - (int)$subnet)));
-                    $network = long2ip($netLong) . '/' . $subnet;
-                    $result['rows'][] = [
-                        'value' => $network,
-                        'label' => '[' . $descr . '] net (' . $network . ')',
-                        'iface' => $ifname,
-                    ];
-                    $result['rows'][] = [
-                        'value' => $ipaddr,
-                        'label' => '[' . $descr . '] address (' . $ipaddr . ')',
-                        'iface' => $ifname,
-                    ];
-                } elseif (in_array($ipaddr, ['dhcp', 'pppoe', 'pptp', 'ppp'])) {
-                    // Dynamic interface — try to read actual IP from system
-                    $realif = (string)$iface->if;
-                    $actualIp = '';
-                    $ipFile = '/tmp/' . $realif . '_ip';
-                    if (!empty($realif) && file_exists($ipFile)) {
-                        $actualIp = trim(file_get_contents($ipFile));
+        // Primary: configd 'interface gateways status' — returns all gateways
+        // including dynamic/auto-created ones (e.g. FRP_GW from tunnel interfaces)
+        try {
+            $backend = new Backend();
+            $response = trim($backend->configdRun('interface gateways status'));
+            $gateways = json_decode($response, true);
+            if (is_array($gateways)) {
+                foreach ($gateways as $gwData) {
+                    if (!is_array($gwData)) {
+                        continue;
                     }
-                    if (!empty($actualIp) && filter_var($actualIp, FILTER_VALIDATE_IP)) {
+                    $name = $gwData['name'] ?? '';
+                    if (!empty($name) && !isset($seen[$name])) {
+                        $seen[$name] = true;
                         $result['rows'][] = [
-                            'value' => $actualIp,
-                            'label' => '[' . $descr . '] address (' . $actualIp . ' / ' . $ipaddr . ')',
-                            'iface' => $ifname,
+                            'name' => $name,
+                            'interface' => $gwData['interface'] ?? '',
+                            'gateway' => $gwData['address'] ?? '',
+                            'descr' => $gwData['status_translated'] ?? '',
                         ];
                     }
                 }
             }
+        } catch (\Throwable $e) {
+            // ignore
         }
 
-        // Firewall aliases (shown for all interfaces)
-        if (isset($config->OPNsense->Firewall->Alias->aliases->alias)) {
-            foreach ($config->OPNsense->Firewall->Alias->aliases->alias as $alias) {
-                $atype = (string)$alias->type;
-                if (in_array($atype, ['host', 'network'])) {
-                    $aname = (string)$alias->name;
-                    $adescr = (string)$alias->description;
-                    $label = $aname;
-                    if ($adescr) {
-                        $label .= ' (' . $adescr . ')';
+        // Fallback: Routing model (if configd didn't return results)
+        if (empty($result['rows'])) {
+            try {
+                $gwModel = new Gateways();
+                foreach ($gwModel->gateway_item->iterateItems() as $uuid => $gw) {
+                    if ((string)$gw->disabled === '1') {
+                        continue;
                     }
-                    $result['rows'][] = [
-                        'value' => $aname,
-                        'label' => $label,
-                        'iface' => '*',
-                    ];
+                    $name = (string)$gw->name;
+                    if (!empty($name) && !isset($seen[$name])) {
+                        $seen[$name] = true;
+                        $result['rows'][] = [
+                            'name' => $name,
+                            'interface' => (string)$gw->interface,
+                            'gateway' => (string)$gw->gateway,
+                            'descr' => (string)$gw->descr,
+                        ];
+                    }
                 }
+            } catch (\Throwable $e) {
+                // ignore
             }
         }
 
         return $result;
-    }
-
-    public function getGatewaysAction()
-    {
-        $result = ['rows' => []];
-
-        // Use configd backend — same method OPNsense core uses
-        $backend = new Backend();
-        $response = trim($backend->configdpRun('interface routes gateways status'));
-        $gateways = json_decode($response, true);
-
-        if (is_array($gateways)) {
-            foreach ($gateways as $gwName => $gwData) {
-                if (is_array($gwData) && !empty($gwName)) {
-                    $result['rows'][] = [
-                        'name' => $gwData['name'] ?? $gwName,
-                        'interface' => $gwData['interface'] ?? '',
-                        'gateway' => $gwData['address'] ?? $gwData['gateway'] ?? '',
-                        'descr' => $gwData['descr'] ?? '',
-                    ];
-                }
-            }
-        }
-
-        return $result;
-    }
-
-    /**
-     * Debug endpoint — shows raw gateway data from all sources.
-     * Access via browser: /api/approuter/settings/debug
-     * DELETE THIS after debugging.
-     */
-    public function debugAction()
-    {
-        $debug = [];
-
-        // 1. configd backend
-        try {
-            $backend = new Backend();
-            $raw = trim($backend->configdpRun('interface routes gateways status'));
-            $debug['configd_raw'] = $raw;
-            $debug['configd_parsed'] = json_decode($raw, true);
-        } catch (\Throwable $e) {
-            $debug['configd_error'] = $e->getMessage();
-        }
-
-        // 2. Routing model
-        try {
-            $gwModel = new \OPNsense\Routing\Gateways();
-            $items = [];
-            foreach ($gwModel->gateway_item->iterateItems() as $uuid => $gw) {
-                $items[$uuid] = [
-                    'name' => (string)$gw->name,
-                    'interface' => (string)$gw->interface,
-                    'gateway' => (string)$gw->gateway,
-                    'descr' => (string)$gw->descr,
-                    'disabled' => (string)$gw->disabled,
-                ];
-            }
-            $debug['routing_model'] = $items;
-        } catch (\Throwable $e) {
-            $debug['routing_model_error'] = $e->getMessage();
-        }
-
-        // 3. Config XML paths
-        $config = Config::getInstance()->object();
-        $debug['has_gateways_node'] = isset($config->gateways);
-        $debug['has_gateways_gateway_item'] = isset($config->gateways->gateway_item);
-        $debug['has_opnsense_gateways'] = isset($config->OPNsense->Gateways);
-        $debug['has_opnsense_gateways_item'] = isset($config->OPNsense->Gateways->gateway_item);
-
-        // Dump legacy gateway items if they exist
-        if (isset($config->gateways->gateway_item)) {
-            $legacy = [];
-            foreach ($config->gateways->gateway_item as $gw) {
-                $item = [];
-                foreach ($gw->children() as $child) {
-                    $item[$child->getName()] = (string)$child;
-                }
-                $legacy[] = $item;
-            }
-            $debug['legacy_gateways'] = $legacy;
-        }
-
-        // Dump OPNsense MVC gateway items if they exist
-        if (isset($config->OPNsense->Gateways)) {
-            $mvc = [];
-            foreach ($config->OPNsense->Gateways->children() as $section) {
-                $sectionName = $section->getName();
-                if ($sectionName === 'gateway_item') {
-                    $item = [];
-                    foreach ($section->children() as $child) {
-                        $item[$child->getName()] = (string)$child;
-                    }
-                    $mvc[] = $item;
-                }
-            }
-            $debug['mvc_gateways'] = $mvc;
-        }
-
-        // 4. Interfaces
-        $ifaces = [];
-        if (isset($config->interfaces)) {
-            foreach ($config->interfaces->children() as $ifname => $iface) {
-                $ifaces[$ifname] = [
-                    'descr' => (string)$iface->descr,
-                    'enable' => (string)$iface->enable,
-                    'ipaddr' => (string)$iface->ipaddr,
-                    'subnet' => (string)$iface->subnet,
-                    'if' => (string)$iface->if,
-                ];
-            }
-        }
-        $debug['interfaces'] = $ifaces;
-
-        return $debug;
     }
 }
