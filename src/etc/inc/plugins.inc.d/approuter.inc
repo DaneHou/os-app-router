@@ -66,10 +66,15 @@ function approuter_firewall(\OPNsense\Firewall\Plugin $fw)
         ];
     }
 
-    // Register pf tables for each needed category
+    // Register pf tables for each needed category (supports dotted notation: "video.bilibili")
     foreach (array_keys($categoriesNeeded) as $category) {
-        $tableName = $tablePrefix . '_' . $category;
+        // Convert dots to underscores for pf table name
+        $tableName = $tablePrefix . '_' . str_replace('.', '_', $category);
+        // Try dotted filename first (e.g. video.bilibili.txt), then underscored
         $cidrFile = $cidrsDir . '/' . $category . '.txt';
+        if (!file_exists($cidrFile)) {
+            $cidrFile = $cidrsDir . '/' . str_replace('.', '_', $category) . '.txt';
+        }
 
         if (file_exists($cidrFile)) {
             $fw->registerTable($tableName, [
@@ -103,7 +108,7 @@ function approuter_firewall(\OPNsense\Firewall\Plugin $fw)
                 continue;
             }
 
-            $tableName = $tablePrefix . '_' . $category;
+            $tableName = $tablePrefix . '_' . str_replace('.', '_', $category);
             $description = 'AppRouter: ' . ($rule['description'] ?: $category) . ' via ' . $rule['gateway'];
 
             $fw->registerFilterRule(

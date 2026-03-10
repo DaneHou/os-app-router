@@ -19,6 +19,55 @@
 
 <script>
     $( document ).ready(function() {
+        // Cache gateway and category options for dialog population
+        var gatewayOptions = [];
+        var categoryOptions = [];
+
+        // Fetch gateways
+        ajaxGet(url="/api/approuter/settings/getGateways", sendData={}, callback=function(data, status) {
+            if (data && data.rows) {
+                gatewayOptions = data.rows;
+            }
+        });
+
+        // Fetch categories
+        ajaxGet(url="/api/approuter/settings/getCategories", sendData={}, callback=function(data, status) {
+            if (data && data.rows) {
+                categoryOptions = data.rows;
+            }
+        });
+
+        // Populate gateway dropdown and categories tokenizer before dialog opens
+        $('#DialogRule').on('opnsense_bootgrid_mapped', function(e) {
+            // Populate gateway dropdown
+            var $gw = $('#rule\\.gateway');
+            var currentVal = $gw.val();
+            $gw.empty();
+            $gw.append($('<option>').val('').text('--- Select Gateway ---'));
+            $.each(gatewayOptions, function(idx, gw) {
+                var label = gw.name;
+                if (gw.descr) label += ' (' + gw.descr + ')';
+                if (gw.gateway && gw.gateway !== 'group') label += ' [' + gw.gateway + ']';
+                $gw.append($('<option>').val(gw.name).text(label));
+            });
+            if (currentVal) {
+                $gw.val(currentVal);
+            }
+            $gw.selectpicker('refresh');
+
+            // Populate categories tokenizer
+            var $cat = $('#rule\\.categories');
+            var currentCats = $cat.val();
+            $cat.empty();
+            $.each(categoryOptions, function(idx, opt) {
+                $cat.append($('<option>').val(opt.value).text(opt.label));
+            });
+            if (currentCats) {
+                $cat.val(currentCats);
+            }
+            $cat.selectpicker('refresh');
+        });
+
         // Both forms share the same model endpoint - load once, populate both
         var data_get_map = {
             'frm_GeneralSettings': "/api/approuter/settings/get",
@@ -205,9 +254,9 @@
     [
         {'id': 'rule.enabled', 'label': lang._('Enabled'), 'type': 'checkbox'},
         {'id': 'rule.description', 'label': lang._('Description'), 'type': 'text'},
-        {'id': 'rule.sourceNets', 'label': lang._('Source Networks'), 'type': 'select_multiple', 'help': lang._('Select LAN IPs or subnets that should use application routing')},
-        {'id': 'rule.categories', 'label': lang._('App Categories'), 'type': 'select_multiple', 'help': lang._('Select application categories to route')},
-        {'id': 'rule.gateway', 'label': lang._('Gateway'), 'type': 'text', 'help': lang._('Target gateway name (e.g., WAN2_DHCP)')},
+        {'id': 'rule.sourceNets', 'label': lang._('Source Networks'), 'type': 'select_multiple', 'help': lang._('Type IP addresses or subnets (e.g. 192.168.1.0/24) and press Enter')},
+        {'id': 'rule.categories', 'label': lang._('App Categories'), 'type': 'select_multiple', 'help': lang._('Search and select app categories or individual apps (e.g. type "爱" to find iQIYI)')},
+        {'id': 'rule.gateway', 'label': lang._('Gateway'), 'type': 'dropdown', 'help': lang._('Select target gateway for routing')},
         {'id': 'rule.interface', 'label': lang._('Interface'), 'type': 'dropdown', 'help': lang._('Inbound interface (usually LAN)')}
     ],
     'id':'DialogRule',

@@ -75,6 +75,33 @@ class SettingsController extends ApiMutableModelControllerBase
         return $this->toggleBase('rules.rule', $uuid, $enabled);
     }
 
+    public function getCategoriesAction()
+    {
+        $result = ['rows' => []];
+        $categoriesFile = '/usr/local/opnsense/scripts/OPNsense/Approuter/app_categories.json';
+        if (file_exists($categoriesFile)) {
+            $data = json_decode(file_get_contents($categoriesFile), true);
+            if (is_array($data)) {
+                foreach ($data as $catId => $catData) {
+                    $catName = $catData['name'] ?? $catId;
+                    $result['rows'][] = [
+                        'value' => $catId,
+                        'label' => $catName . ' (All)',
+                    ];
+                    if (isset($catData['apps']) && is_array($catData['apps'])) {
+                        foreach ($catData['apps'] as $appId => $appData) {
+                            $result['rows'][] = [
+                                'value' => $catId . '.' . $appId,
+                                'label' => $appData['label'] ?? $appId,
+                            ];
+                        }
+                    }
+                }
+            }
+        }
+        return $result;
+    }
+
     public function getGatewaysAction()
     {
         $result = ['rows' => []];

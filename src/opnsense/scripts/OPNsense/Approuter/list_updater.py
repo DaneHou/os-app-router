@@ -159,32 +159,75 @@ def write_if_changed(filepath, content):
     return True
 
 
+def get_all_domains_for_category(cat_data):
+    """Get all domains for a category (union of all apps)."""
+    domains = set()
+    if "apps" in cat_data:
+        for app_data in cat_data["apps"].values():
+            domains.update(app_data.get("domains", []))
+    elif "domains" in cat_data:
+        # Legacy flat format fallback
+        domains.update(cat_data["domains"])
+    return domains
+
+
 def generate_dnsmasq_conf(categories, table_prefix="approuter"):
-    """Generate Dnsmasq ipset config snippets per category."""
+    """Generate Dnsmasq ipset config snippets per category and per app."""
     for cat_id, cat_data in categories.items():
+        # Category-level config (all apps combined)
+        all_domains = get_all_domains_for_category(cat_data)
         lines = []
         table_name = f"{table_prefix}_{cat_id}"
-        for domain in sorted(cat_data.get("domains", [])):
+        for domain in sorted(all_domains):
             lines.append(f"ipset=/{domain}/{table_name}")
         content = f"# AppRouter: {cat_data.get('name', cat_id)}\n"
         content += f"# Auto-generated - do not edit\n"
         content += "\n".join(lines) + "\n"
         filepath = os.path.join(DNSMASQ_DIR, f"approuter_{cat_id}.conf")
         write_if_changed(filepath, content)
+
+        # Per-app configs
+        if "apps" in cat_data:
+            for app_id, app_data in cat_data["apps"].items():
+                app_domains = app_data.get("domains", [])
+                app_table = f"{table_prefix}_{cat_id}_{app_id}"
+                app_lines = []
+                for domain in sorted(app_domains):
+                    app_lines.append(f"ipset=/{domain}/{app_table}")
+                app_content = f"# AppRouter: {app_data.get('label', app_id)}\n"
+                app_content += f"# Auto-generated - do not edit\n"
+                app_content += "\n".join(app_lines) + "\n"
+                app_filepath = os.path.join(DNSMASQ_DIR, f"approuter_{cat_id}_{app_id}.conf")
+                write_if_changed(app_filepath, app_content)
+
     log(f"Generated Dnsmasq configs for {len(categories)} categories")
 
 
 def generate_unbound_conf(categories, table_prefix="approuter"):
-    """Generate Unbound domain-to-table mapping files."""
+    """Generate Unbound domain-to-table mapping files per category and per app."""
     for cat_id, cat_data in categories.items():
-        domains = cat_data.get("domains", [])
+        # Category-level
+        all_domains = sorted(get_all_domains_for_category(cat_data))
         table_name = f"{table_prefix}_{cat_id}"
         mapping = {
             "table": table_name,
-            "domains": sorted(domains)
+            "domains": all_domains
         }
         filepath = os.path.join(UNBOUND_DIR, f"approuter_{cat_id}.json")
         write_if_changed(filepath, json.dumps(mapping, indent=2) + "\n")
+
+        # Per-app
+        if "apps" in cat_data:
+            for app_id, app_data in cat_data["apps"].items():
+                app_domains = sorted(app_data.get("domains", []))
+                app_table = f"{table_prefix}_{cat_id}_{app_id}"
+                app_mapping = {
+                    "table": app_table,
+                    "domains": app_domains
+                }
+                app_filepath = os.path.join(UNBOUND_DIR, f"approuter_{cat_id}_{app_id}.json")
+                write_if_changed(app_filepath, json.dumps(app_mapping, indent=2) + "\n")
+
     log(f"Generated Unbound configs for {len(categories)} categories")
 
 
@@ -279,7 +322,13 @@ def main():
         log("Starting list update")
         updated = update_remote_lists(config, state)
         for cat_id, cat_data in categories.items():
-            write_domain_file(cat_id, cat_data.get("domains", []))
+            # Write category-level domain file (all apps combined)
+            all_domains = get_all_domains_for_category(cat_data)
+            write_domain_file(cat_id, all_domains)
+            # Write per-app domain files
+            if "apps" in cat_data:
+                for app_id, app_data in cat_data["apps"].items():
+                    write_domain_file(f"{cat_id}.{app_id}", app_data.get("domains", []))
         generate_dnsmasq_conf(categories)
         generate_unbound_conf(categories)
         state["last_full_update"] = int(time.time())
@@ -294,7 +343,7 @@ def main():
         log("DNS configs regenerated")
 
     elif action == "status":
-        state["categories"] = {k: len(v.get("domains", [])) for k, v in categories.items()}
+        state["categories"] = {k: len(get_all_domains_for_category(v)) for k, v in categories.items()}
         print(json.dumps(state, indent=2))
 
     elif action == "force":
@@ -304,7 +353,11 @@ def main():
                 del state[key]
         update_remote_lists(config, state)
         for cat_id, cat_data in categories.items():
-            write_domain_file(cat_id, cat_data.get("domains", []))
+            all_domains = get_all_domains_for_category(cat_data)
+            write_domain_file(cat_id, all_domains)
+            if "apps" in cat_data:
+                for app_id, app_data in cat_data["apps"].items():
+                    write_domain_file(f"{cat_id}.{app_id}", app_data.get("domains", []))
         generate_dnsmasq_conf(categories)
         generate_unbound_conf(categories)
         state["last_full_update"] = int(time.time())

@@ -1,124 +1,283 @@
 {
     "video": {
-        "name": "China Video",
-        "description": "Chinese video streaming platforms",
-        "domains": [
-            "bilibili.com",
-            "hdslb.com",
-            "bilivideo.com",
-            "bilivideo.cn",
-            "biliapi.net",
-            "biliapi.com",
-            "douyin.com",
-            "tiktokv.com",
-            "bytedance.com",
-            "volccdn.com",
-            "bytecdn.cn",
-            "byteimg.com",
-            "pstatp.com",
-            "snssdk.com",
-            "ixigua.com",
-            "huoshan.com",
-            "iqiyi.com",
-            "qy.net",
-            "iqiyipic.com",
-            "71.am.com",
-            "youku.com",
-            "ykimg.com",
-            "tudou.com",
-            "soku.com",
-            "v.qq.com",
-            "video.qq.com",
-            "gtimg.com",
-            "mgtv.com",
-            "hunantv.com",
-            "le.com",
-            "letv.com",
-            "sohu.com",
-            "sohutv.com",
-            "acfun.cn",
-            "aixifan.com"
-        ]
+        "name": "China Video 国内视频",
+        "apps": {
+            "bilibili": {
+                "label": "Bilibili 哔哩哔哩",
+                "domains": [
+                    "bilibili.com",
+                    "hdslb.com",
+                    "bilivideo.com",
+                    "bilivideo.cn",
+                    "biliapi.net",
+                    "biliapi.com"
+                ]
+            },
+            "douyin": {
+                "label": "Douyin 抖音",
+                "domains": [
+                    "douyin.com",
+                    "tiktokv.com",
+                    "bytedance.com",
+                    "volccdn.com",
+                    "bytecdn.cn",
+                    "byteimg.com",
+                    "pstatp.com",
+                    "snssdk.com",
+                    "ixigua.com",
+                    "huoshan.com"
+                ]
+            },
+            "iqiyi": {
+                "label": "iQIYI 爱奇艺",
+                "domains": [
+                    "iqiyi.com",
+                    "qy.net",
+                    "iqiyipic.com",
+                    "71.am.com"
+                ]
+            },
+            "youku": {
+                "label": "Youku 优酷",
+                "domains": [
+                    "youku.com",
+                    "ykimg.com",
+                    "tudou.com",
+                    "soku.com"
+                ]
+            },
+            "tencentvideo": {
+                "label": "Tencent Video 腾讯视频",
+                "domains": [
+                    "v.qq.com",
+                    "video.qq.com",
+                    "gtimg.com"
+                ]
+            },
+            "mgtv": {
+                "label": "MGTV 芒果TV",
+                "domains": [
+                    "mgtv.com",
+                    "hunantv.com"
+                ]
+            },
+            "letv": {
+                "label": "LeTV 乐视",
+                "domains": [
+                    "le.com",
+                    "letv.com"
+                ]
+            },
+            "sohu": {
+                "label": "Sohu Video 搜狐视频",
+                "domains": [
+                    "sohu.com",
+                    "sohutv.com"
+                ]
+            },
+            "acfun": {
+                "label": "AcFun A站",
+                "domains": [
+                    "acfun.cn",
+                    "aixifan.com"
+                ]
+            }
+        }
     },
     "social": {
-        "name": "China Social",
-        "description": "Chinese social media platforms",
-        "domains": [
-            "weibo.com",
-            "sinaimg.cn",
-            "sina.com.cn",
-            "weixin.qq.com",
-            "wx.qq.com",
-            "wechat.com",
-            "xiaohongshu.com",
-            "xhscdn.com",
-            "xhslink.com",
-            "zhihu.com",
-            "zhimg.com",
-            "douban.com",
-            "doubanio.com",
-            "tieba.baidu.com",
-            "tieba.com",
-            "qq.com",
-            "im.qq.com",
-            "qzone.qq.com"
-        ]
+        "name": "China Social 社交媒体",
+        "apps": {
+            "weibo": {
+                "label": "Weibo 微博",
+                "domains": [
+                    "weibo.com",
+                    "sinaimg.cn",
+                    "sina.com.cn"
+                ]
+            },
+            "wechat": {
+                "label": "WeChat 微信",
+                "domains": [
+                    "weixin.qq.com",
+                    "wx.qq.com",
+                    "wechat.com"
+                ]
+            },
+            "xiaohongshu": {
+                "label": "Xiaohongshu 小红书",
+                "domains": [
+                    "xiaohongshu.com",
+                    "xhscdn.com",
+                    "xhslink.com"
+                ]
+            },
+            "zhihu": {
+                "label": "Zhihu 知乎",
+                "domains": [
+                    "zhihu.com",
+                    "zhimg.com"
+                ]
+            },
+            "douban": {
+                "label": "Douban 豆瓣",
+                "domains": [
+                    "douban.com",
+                    "doubanio.com"
+                ]
+            },
+            "tieba": {
+                "label": "Tieba 百度贴吧",
+                "domains": [
+                    "tieba.baidu.com",
+                    "tieba.com"
+                ]
+            },
+            "qq": {
+                "label": "QQ 腾讯QQ",
+                "domains": [
+                    "qq.com",
+                    "im.qq.com",
+                    "qzone.qq.com"
+                ]
+            }
+        }
     },
     "shopping": {
-        "name": "China Shopping",
-        "description": "Chinese e-commerce platforms",
-        "domains": [
-            "taobao.com",
-            "tmall.com",
-            "alicdn.com",
-            "alibaba.com",
-            "alipay.com",
-            "aliyun.com",
-            "1688.com",
-            "jd.com",
-            "jdcloud.com",
-            "360buyimg.com",
-            "jd.hk",
-            "pinduoduo.com",
-            "yangkeduo.com",
-            "suning.com",
-            "vip.com",
-            "vipshop.com",
-            "dangdang.com",
-            "mogujie.com"
-        ]
+        "name": "China Shopping 电商购物",
+        "apps": {
+            "taobao": {
+                "label": "Taobao 淘宝",
+                "domains": [
+                    "taobao.com",
+                    "tmall.com",
+                    "alicdn.com",
+                    "alibaba.com",
+                    "alipay.com",
+                    "aliyun.com",
+                    "1688.com"
+                ]
+            },
+            "jd": {
+                "label": "JD 京东",
+                "domains": [
+                    "jd.com",
+                    "jdcloud.com",
+                    "360buyimg.com",
+                    "jd.hk"
+                ]
+            },
+            "pinduoduo": {
+                "label": "Pinduoduo 拼多多",
+                "domains": [
+                    "pinduoduo.com",
+                    "yangkeduo.com"
+                ]
+            },
+            "suning": {
+                "label": "Suning 苏宁",
+                "domains": [
+                    "suning.com"
+                ]
+            },
+            "vip": {
+                "label": "VIP 唯品会",
+                "domains": [
+                    "vip.com",
+                    "vipshop.com"
+                ]
+            },
+            "dangdang": {
+                "label": "Dangdang 当当",
+                "domains": [
+                    "dangdang.com"
+                ]
+            },
+            "mogujie": {
+                "label": "Mogujie 蘑菇街",
+                "domains": [
+                    "mogujie.com"
+                ]
+            }
+        }
     },
     "music": {
-        "name": "China Music",
-        "description": "Chinese music streaming platforms",
-        "domains": [
-            "music.163.com",
-            "163yun.com",
-            "126.net",
-            "y.qq.com",
-            "music.qq.com",
-            "kugou.com",
-            "kuwo.cn",
-            "xiami.com",
-            "qianqian.com"
-        ]
+        "name": "China Music 音乐",
+        "apps": {
+            "neteasemusic": {
+                "label": "NetEase Music 网易云音乐",
+                "domains": [
+                    "music.163.com",
+                    "163yun.com",
+                    "126.net"
+                ]
+            },
+            "qqmusic": {
+                "label": "QQ Music QQ音乐",
+                "domains": [
+                    "y.qq.com",
+                    "music.qq.com"
+                ]
+            },
+            "kugou": {
+                "label": "Kugou 酷狗音乐",
+                "domains": [
+                    "kugou.com"
+                ]
+            },
+            "kuwo": {
+                "label": "Kuwo 酷我音乐",
+                "domains": [
+                    "kuwo.cn"
+                ]
+            },
+            "xiami": {
+                "label": "Xiami 虾米音乐",
+                "domains": [
+                    "xiami.com"
+                ]
+            },
+            "qianqian": {
+                "label": "Qianqian 千千音乐",
+                "domains": [
+                    "qianqian.com"
+                ]
+            }
+        }
     },
     "gaming": {
-        "name": "China Gaming",
-        "description": "Chinese gaming platforms",
-        "domains": [
-            "mihoyo.com",
-            "hoyoverse.com",
-            "hoyolab.com",
-            "yuanshen.com",
-            "bhsr.com",
-            "starrails.com",
-            "tencent.com",
-            "wegame.com.cn",
-            "netease.com",
-            "163.com",
-            "4399.com",
-            "bilibili.com"
-        ]
+        "name": "China Gaming 游戏",
+        "apps": {
+            "mihoyo": {
+                "label": "miHoYo 米哈游",
+                "domains": [
+                    "mihoyo.com",
+                    "hoyoverse.com",
+                    "hoyolab.com",
+                    "yuanshen.com",
+                    "bhsr.com",
+                    "starrails.com"
+                ]
+            },
+            "tencentgames": {
+                "label": "Tencent Games 腾讯游戏",
+                "domains": [
+                    "tencent.com",
+                    "wegame.com.cn"
+                ]
+            },
+            "netease": {
+                "label": "NetEase Games 网易游戏",
+                "domains": [
+                    "netease.com",
+                    "163.com"
+                ]
+            },
+            "4399": {
+                "label": "4399 小游戏",
+                "domains": [
+                    "4399.com"
+                ]
+            }
+        }
     }
 }

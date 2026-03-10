@@ -41,24 +41,17 @@
                 <description type="TextField">
                     <Required>N</Required>
                 </description>
-                <sourceNets type="NetworkField">
+                <sourceNets type="CSVListField">
                     <Required>Y</Required>
                     <FieldSeparator>,</FieldSeparator>
-                    <asList>Y</asList>
-                    <WildcardEnabled>N</WildcardEnabled>
+                    <Mask>/^[0-9a-f:.\/ ,]+$/i</Mask>
+                    <ValidationMessage>Enter valid IP addresses or subnets (e.g. 192.168.1.0/24)</ValidationMessage>
                 </sourceNets>
-                <categories type="OptionField">
-                    <Multiple>Y</Multiple>
-                    <FieldSeparator>,</FieldSeparator>
-                    <OptionValues>
-                        <video>China Video</video>
-                        <social>China Social</social>
-                        <shopping>China Shopping</shopping>
-                        <music>China Music</music>
-                        <gaming>China Gaming</gaming>
-                        <china_all>All China Traffic</china_all>
-                    </OptionValues>
+                <categories type="CSVListField">
                     <Required>Y</Required>
+                    <FieldSeparator>,</FieldSeparator>
+                    <Mask>/^[a-z0-9_.,]+$/</Mask>
+                    <ValidationMessage>Select at least one app category</ValidationMessage>
                 </categories>
                 <gateway type="TextField">
                     <Required>Y</Required>
