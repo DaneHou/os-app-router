@@ -87,24 +87,8 @@ class SettingsController extends ApiMutableModelControllerBase
             }
             $result['rule']['categories'] = $catOptions;
 
-            // Augment sourceNets: CSVListField → select_multiple options
-            $netValue = is_string($result['rule']['sourceNets']) ? $result['rule']['sourceNets'] : '';
-            $netSelected = array_filter(array_map('trim', explode(',', $netValue)));
-            $networks = $this->getNetworksAction();
-            $netOptions = [];
-            foreach ($networks['rows'] as $net) {
-                $netOptions[$net['value']] = [
-                    'value' => $net['label'],
-                    'selected' => in_array($net['value'], $netSelected) ? 1 : 0,
-                ];
-            }
-            // Add any custom values not in predefined list
-            foreach ($netSelected as $val) {
-                if (!empty($val) && !isset($netOptions[$val])) {
-                    $netOptions[$val] = ['value' => $val, 'selected' => 1];
-                }
-            }
-            $result['rule']['sourceNets'] = $netOptions;
+            // sourceNets: keep as raw CSV string so tokenizer allows free text input
+            // Suggestion options are injected client-side via opnsense_bootgrid_mapped
         }
 
         return $result;
@@ -161,8 +145,8 @@ class SettingsController extends ApiMutableModelControllerBase
     {
         $result = ['rows' => []];
 
-        // "any" = all traffic
-        $result['rows'][] = ['value' => 'any', 'label' => 'any'];
+        // "any" = all traffic (always shown regardless of interface)
+        $result['rows'][] = ['value' => 'any', 'label' => 'any', 'iface' => '*'];
 
         $config = Config::getInstance()->object();
         if (isset($config->interfaces)) {
@@ -180,17 +164,18 @@ class SettingsController extends ApiMutableModelControllerBase
                     $result['rows'][] = [
                         'value' => $network,
                         'label' => $descr . ' net (' . $network . ')',
+                        'iface' => $ifname,
                     ];
-                    // Also add single interface address
                     $result['rows'][] = [
-                        'value' => $ipaddr . '/32',
+                        'value' => $ipaddr,
                         'label' => $descr . ' address (' . $ipaddr . ')',
+                        'iface' => $ifname,
                     ];
                 }
             }
         }
 
-        // Firewall aliases
+        // Firewall aliases (shown for all interfaces)
         if (isset($config->OPNsense->Firewall->Alias->aliases->alias)) {
             foreach ($config->OPNsense->Firewall->Alias->aliases->alias as $alias) {
                 $atype = (string)$alias->type;
@@ -204,6 +189,7 @@ class SettingsController extends ApiMutableModelControllerBase
                     $result['rows'][] = [
                         'value' => $aname,
                         'label' => $label,
+                        'iface' => '*',
                     ];
                 }
             }

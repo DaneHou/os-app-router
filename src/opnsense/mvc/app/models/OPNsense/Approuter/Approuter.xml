@@ -44,7 +44,7 @@
                 <sourceNets type="CSVListField">
                     <Required>Y</Required>
                     <FieldSeparator>,</FieldSeparator>
-                    <Mask>/^[a-z0-9_:.\/ ,]+$/i</Mask>
+                    <Mask>/^[a-z0-9_:.\-\/ ,]+$/i</Mask>
                     <ValidationMessage>Enter "any", interface nets, aliases, or IP/subnet addresses</ValidationMessage>
                 </sourceNets>
                 <categories type="CSVListField">
