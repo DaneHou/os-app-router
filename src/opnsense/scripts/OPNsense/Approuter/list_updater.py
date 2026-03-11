@@ -330,14 +330,14 @@ def generate_unbound_conf(categories, table_prefix="approuter", v2fly_merged=Non
 
     log(f"Generated Unbound configs for {len(categories)} categories")
 
-    # Generate custom domain mapping files from rules
-    if config:
-        generate_custom_domain_mappings(config, table_prefix)
+    # Generate custom domain mapping files from rules (always run for orphan cleanup)
+    generate_custom_domain_mappings(config or {}, table_prefix)
 
 
 def generate_custom_domain_mappings(config, table_prefix="approuter"):
     """Generate Unbound mapping files for per-rule custom domains."""
     rules = config.get("rules", [])
+    valid_files = set()
     custom_count = 0
     for rule in rules:
         custom_str = rule.get("custom_domains", "").strip()
@@ -354,9 +354,16 @@ def generate_custom_domain_mappings(config, table_prefix="approuter"):
             "table": table_name,
             "domains": sorted(domains)
         }
-        filepath = os.path.join(UNBOUND_DIR, f"approuter_custom_{rule_id}.json")
+        filename = f"approuter_custom_{rule_id}.json"
+        filepath = os.path.join(UNBOUND_DIR, filename)
         write_if_changed(filepath, json.dumps(mapping, indent=2) + "\n")
+        valid_files.add(filename)
         custom_count += 1
+    # Clean orphaned custom mapping files
+    for f in Path(UNBOUND_DIR).glob("approuter_custom_*.json"):
+        if f.name not in valid_files:
+            f.unlink()
+            log(f"Removed orphaned file: {f.name}")
     if custom_count:
         log(f"Generated {custom_count} custom domain mapping files")
 
@@ -364,6 +371,7 @@ def generate_custom_domain_mappings(config, table_prefix="approuter"):
 def generate_dnsmasq_custom_conf(config, table_prefix="approuter"):
     """Generate Dnsmasq ipset config for per-rule custom domains."""
     rules = config.get("rules", [])
+    valid_files = set()
     custom_count = 0
     for rule in rules:
         custom_str = rule.get("custom_domains", "").strip()
@@ -379,9 +387,16 @@ def generate_dnsmasq_custom_conf(config, table_prefix="approuter"):
                  "# Auto-generated - do not edit"]
         for domain in sorted(domains):
             lines.append(f"ipset=/{domain}/{table_name}")
-        filepath = os.path.join(DNSMASQ_DIR, f"approuter_custom_{rule_id}.conf")
+        filename = f"approuter_custom_{rule_id}.conf"
+        filepath = os.path.join(DNSMASQ_DIR, filename)
         write_if_changed(filepath, "\n".join(lines) + "\n")
+        valid_files.add(filename)
         custom_count += 1
+    # Clean orphaned custom dnsmasq config files
+    for f in Path(DNSMASQ_DIR).glob("approuter_custom_*.conf"):
+        if f.name not in valid_files:
+            f.unlink()
+            log(f"Removed orphaned file: {f.name}")
     if custom_count:
         log(f"Generated {custom_count} Dnsmasq custom domain configs")
 
