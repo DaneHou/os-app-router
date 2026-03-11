@@ -47,10 +47,6 @@ class ServiceController extends ApiMutableServiceControllerBase
             $backend = new Backend();
             $backend->configdRun('template reload OPNsense/Approuter');
             $backend->configdRun('approuter generate_dns');
-            // Auto-update lists if they don't exist yet
-            if (!file_exists('/usr/local/etc/app-router/cidrs/china_all.txt')) {
-                $backend->configdRun('approuter update_lists');
-            }
 
             // Reload Unbound if in unbound mode (picks up log-replies config)
             $mdl = new Approuter();
@@ -63,6 +59,11 @@ class ServiceController extends ApiMutableServiceControllerBase
             // Always start dns_watcher (warmup_tables works in both DNS modes)
             $backend->configdRun('approuter dns_watcher_start');
 
+            // Trigger list update in background (non-blocking) if lists don't exist yet
+            if (!file_exists('/usr/local/etc/app-router/cidrs/china_all.txt')) {
+                $backend->configdpRun('approuter update_lists');
+            }
+
             $status = "ok";
         }
         return ['status' => $status];
@@ -74,7 +75,7 @@ class ServiceController extends ApiMutableServiceControllerBase
         if ($this->request->isPost()) {
             session_write_close();
             $backend = new Backend();
-            $backend->configdRun('approuter update_lists');
+            $backend->configdpRun('approuter update_lists');
             $status = "ok";
         }
         return ['status' => $status];
@@ -86,7 +87,7 @@ class ServiceController extends ApiMutableServiceControllerBase
         if ($this->request->isPost()) {
             session_write_close();
             $backend = new Backend();
-            $backend->configdRun('approuter force_update');
+            $backend->configdpRun('approuter force_update');
             $status = "ok";
         }
         return ['status' => $status];
@@ -149,7 +150,7 @@ class ServiceController extends ApiMutableServiceControllerBase
 
         // Recent dns_watcher log entries
         $logs = [];
-        exec("grep -i 'approuter' /var/log/system.log 2>/dev/null | tail -30", $logLines);
+        exec("grep -i 'approuter' /var/log/system/latest.log 2>/dev/null | tail -30", $logLines);
         foreach ($logLines as $line) {
             $logs[] = $line;
         }
