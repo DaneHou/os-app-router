@@ -40,6 +40,8 @@
                 </enabled>
                 <description type="TextField">
                     <Required>N</Required>
+                    <Mask>/^[^"\\]{0,255}$/</Mask>
+                    <ValidationMessage>Description must not contain quotes or backslashes</ValidationMessage>
                 </description>
                 <sourceNets type="CSVListField">
                     <Required>Y</Required>
@@ -55,6 +57,8 @@
                 </categories>
                 <gateway type="TextField">
                     <Required>Y</Required>
+                    <Mask>/^[A-Za-z0-9_\-]+$/</Mask>
+                    <ValidationMessage>Gateway name must contain only letters, numbers, underscores and hyphens</ValidationMessage>
                 </gateway>
                 <customDomains type="TextField">
                     <Required>N</Required>
@@ -76,14 +80,18 @@
                 <Required>N</Required>
             </chinaDomainUrl>
             <chinaCidrUrl type="UrlField">
-                <Default>https://raw.githubusercontent.com/ruijzhan/chnroute/master/chnroute.txt</Default>
+                <Default>https://raw.githubusercontent.com/misakaio/chnroutes2/master/chnroutes.txt</Default>
                 <Required>N</Required>
             </chinaCidrUrl>
             <customDomains type="TextField">
                 <Required>N</Required>
+                <Mask>/^[a-z0-9_.,\-\s]*$/i</Mask>
+                <ValidationMessage>Enter comma-separated domains</ValidationMessage>
             </customDomains>
             <customCidrs type="TextField">
                 <Required>N</Required>
+                <Mask>/^[0-9a-f.:\/,\s]*$/i</Mask>
+                <ValidationMessage>Enter comma-separated CIDRs (e.g. 10.0.0.0/8, 172.16.0.0/12)</ValidationMessage>
             </customCidrs>
         </lists>
     </items>

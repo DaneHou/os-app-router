@@ -19,6 +19,17 @@
 
 <script>
     $( document ).ready(function() {
+        // Tab persistence via URL hash
+        if (window.location.hash) {
+            $('#maintabs a[href="' + window.location.hash + '"]').tab('show');
+        }
+        $('#maintabs a').on('shown.bs.tab', function (e) {
+            window.location.hash = e.target.hash;
+        });
+
+        // Service status control (green/red indicator + stop/restart buttons)
+        updateServiceControlUI('approuter');
+
         // Both forms share the same model endpoint - load once, populate both
         var data_get_map = {
             'frm_GeneralSettings': "/api/approuter/settings/get",
@@ -83,7 +94,7 @@
         loadStatus();
 
         function loadStatus() {
-            ajaxGet(url="/api/approuter/service/status", sendData={}, callback=function(data, status) {
+            ajaxGet(url="/api/approuter/service/detailStatus", sendData={}, callback=function(data, status) {
                 if (data && data.data) {
                     var info = data.data;
                     var html = '';
@@ -143,7 +154,6 @@
                         html += '<thead><tr><th>{{ lang._("Rule") }}</th><th>{{ lang._("Packets") }}</th><th>{{ lang._("Bytes") }}</th></tr></thead>';
                         for (var i = 0; i < info.rule_stats.length; i++) {
                             var rs = info.rule_stats[i];
-                            var shortRule = rs.rule.replace(/pass in quick on \S+ route-to \([^)]+\) inet from /, 'from ');
                             var bytes = rs.bytes;
                             var bytesStr = bytes > 1073741824 ? (bytes/1073741824).toFixed(1) + ' GB' :
                                            bytes > 1048576 ? (bytes/1048576).toFixed(1) + ' MB' :
@@ -151,7 +161,7 @@
                             var pktBadge = rs.packets > 0 ?
                                 '<span class="label label-success">' + rs.packets.toLocaleString() + '</span>' :
                                 '<span class="label label-default">0</span>';
-                            html += '<tr><td style="font-size:12px;word-break:break-all">' + shortRule + '</td><td>' + pktBadge + '</td><td>' + bytesStr + '</td></tr>';
+                            html += '<tr><td>' + rs.rule.replace(/</g, '&lt;').replace(/>/g, '&gt;') + '</td><td>' + pktBadge + '</td><td>' + bytesStr + '</td></tr>';
                         }
                         html += '</table>';
                     }
