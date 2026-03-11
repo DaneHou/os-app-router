@@ -1,10 +1,14 @@
 #!/usr/local/bin/python3
 """
-AppRouter DNS Watcher — Resolves domains via Unbound and updates pf tables.
+AppRouter DNS Watcher — Captures actual DNS responses via tcpdump.
 
-Queries the local Unbound resolver (same path as clients) to get the actual
-CDN IPs that clients will receive. Adds IPs + /24 subnets to pf tables and
-kills stale pf states so existing connections get re-routed.
+Sniffs DNS response packets on LAN interfaces to capture the real IPs
+that Unbound returns to clients. This is the only reliable way to handle
+CDN domains (like Akamai) where the resolver returns different edge nodes
+based on timing and cache state.
+
+Also runs periodic active resolution (drill via Unbound) as a fallback
+to pre-populate tables before any client DNS query arrives.
 
 Designed to run as a foreground process under FreeBSD daemon(8).
 """
@@ -19,19 +23,21 @@ import sys
 import time
 import signal
 import syslog
+import threading
 from pathlib import Path
 
 CONFIG_DIR = "/usr/local/etc/app-router/unbound.d"
-CONFIG_FILE = "/usr/local/etc/app-router/config.json"
 CLIENTS_DIR = Path("/usr/local/etc/app-router/clients")
 LOG_FILE = "/var/log/approuter_dns_watcher.log"
-RESOLVE_INTERVAL = 30  # seconds between full resolution cycles
+RESOLVE_INTERVAL = 300  # active resolution every 5 min (backup only)
 
-# Unbound listener — read from unbound.conf at startup
+# Unbound listener — for active resolution fallback
 UNBOUND_ADDR = "127.0.0.1"
-UNBOUND_PORT = 53530  # OPNsense default
+UNBOUND_PORT = 53530
 
 domain_table_map = {}
+# Lock for concurrent table updates from multiple sniffer threads
+table_lock = threading.Lock()
 
 
 def log(msg, level=syslog.LOG_INFO):
@@ -63,57 +69,60 @@ def detect_unbound_port():
         pass
 
 
-def resolve_via_unbound(domain):
-    """Resolve a domain using drill via the local Unbound instance.
-    Returns a set of IPv4 addresses."""
-    ips = set()
+def detect_lan_interfaces():
+    """Find LAN interface names from Unbound's listening IPs."""
+    # Read Unbound's interface IPs (skip loopback and link-local)
+    listen_ips = set()
+    try:
+        with open("/var/unbound/unbound.conf") as f:
+            for line in f:
+                line = line.strip()
+                if line.startswith("interface:"):
+                    ip = line.split(":", 1)[1].strip()
+                    # Skip loopback and IPv6
+                    if ip.startswith("127.") or ":" in ip:
+                        continue
+                    listen_ips.add(ip)
+    except IOError:
+        pass
+
+    if not listen_ips:
+        return []
+
+    # Map IPs to interface names via ifconfig
+    iface_map = {}
     try:
         result = subprocess.run(
-            ["/usr/bin/drill", f"@{UNBOUND_ADDR}", "-p", str(UNBOUND_PORT),
-             domain, "A"],
-            capture_output=True, text=True, timeout=10
+            ["/sbin/ifconfig", "-a"],
+            capture_output=True, text=True, timeout=5
         )
-        # Parse drill output: look for A records in ANSWER SECTION
-        in_answer = False
+        current_iface = None
         for line in result.stdout.splitlines():
-            if line.startswith(";; ANSWER SECTION:"):
-                in_answer = True
-                continue
-            if in_answer:
-                if line.startswith(";;") or not line.strip():
-                    break
-                # Format: domain. TTL IN A 1.2.3.4
-                parts = line.split()
-                if len(parts) >= 5 and parts[3] == "A":
-                    ip = parts[4]
-                    try:
-                        ipaddress.ip_address(ip)
-                        ips.add(ip)
-                    except ValueError:
-                        pass
+            # Interface line: "igc2: flags=..."
+            if not line.startswith("\t") and not line.startswith(" "):
+                current_iface = line.split(":")[0]
+            elif current_iface and "inet " in line:
+                parts = line.strip().split()
+                if len(parts) >= 2:
+                    ip = parts[1]
+                    if ip in listen_ips:
+                        iface_map[ip] = current_iface
     except (subprocess.TimeoutExpired, OSError):
         pass
 
-    # Fallback to system resolver if drill fails
-    if not ips:
-        try:
-            results = socket.getaddrinfo(
-                domain, None, socket.AF_INET, socket.SOCK_STREAM
-            )
-            for family, _, _, _, sockaddr in results:
-                ips.add(sockaddr[0])
-        except (socket.gaierror, OSError):
-            pass
-
-    return ips
+    interfaces = list(set(iface_map.values()))
+    if interfaces:
+        log(f"Detected LAN interfaces: {interfaces} (IPs: {iface_map})")
+    return interfaces
 
 
 def load_domain_mappings():
     global domain_table_map
-    domain_table_map.clear()
+    new_map = {}
 
     if not os.path.isdir(CONFIG_DIR):
         log(f"Config dir {CONFIG_DIR} not found")
+        domain_table_map = new_map
         return
 
     for config_file in sorted(Path(CONFIG_DIR).glob("approuter_*.json")):
@@ -122,11 +131,28 @@ def load_domain_mappings():
                 data = json.load(f)
             table = data.get("table", "")
             for domain in data.get("domains", []):
-                domain_table_map[domain.lower().rstrip('.')] = table
+                new_map[domain.lower().rstrip('.')] = table
         except (json.JSONDecodeError, IOError) as e:
             log(f"Error loading {config_file}: {e}", syslog.LOG_ERR)
 
+    domain_table_map = new_map
     log(f"Loaded {len(domain_table_map)} domain mappings from {CONFIG_DIR}")
+
+
+def match_domain(query_domain):
+    """Check if query_domain or any parent domain is in our domain list.
+    Returns the matching table name or None.
+    e.g. pcw-data.video.iqiyi.com -> matches iqiyi.com -> approuter_video_iqiyi
+    """
+    query_domain = query_domain.lower().rstrip('.')
+    parts = query_domain.split('.')
+    # Try progressively shorter domain suffixes
+    for i in range(len(parts)):
+        candidate = '.'.join(parts[i:])
+        table = domain_table_map.get(candidate)
+        if table:
+            return table
+    return None
 
 
 def get_client_ips():
@@ -176,13 +202,115 @@ def kill_stale_states(new_ips, client_ips):
     log(f"Killed stale states for {len(new_ips)} new IPs x {len(client_ips)} clients")
 
 
+def process_sniffed_dns(query_domain, answer_ips):
+    """Process a sniffed DNS response: match domain, add IPs to pf table."""
+    table = match_domain(query_domain)
+    if not table:
+        return
+
+    addrs = set()
+    for ip in answer_ips:
+        try:
+            addr = ipaddress.ip_address(ip)
+            if addr.version == 4 and not addr.is_private:
+                addrs.add(ip)
+                addrs.add(str(ipaddress.ip_network(f"{ip}/24", strict=False)))
+        except ValueError:
+            pass
+
+    if not addrs:
+        return
+
+    with table_lock:
+        added = add_to_table(table, addrs)
+        if added > 0:
+            log(f"[sniff] Added {added} entries to {table} for {query_domain}")
+            client_ips = get_client_ips()
+            if client_ips:
+                kill_stale_states(addrs, client_ips)
+
+
+# Regex to extract query domain and A record IPs from tcpdump -vv output
+# Example: "q: A? www.iqiyi.com. 5/0/0 ... A 23.45.123.58, ... A 23.45.123.56 (166)"
+QUERY_RE = re.compile(r'q:\s+A\?\s+(\S+?)\.')
+ANSWER_RE = re.compile(r'\sA\s+(\d+\.\d+\.\d+\.\d+)')
+
+
+def sniff_interface(iface):
+    """Sniff DNS responses on a single interface using tcpdump."""
+    log(f"[sniff] Starting DNS sniffer on {iface}")
+
+    while True:
+        proc = None
+        try:
+            proc = subprocess.Popen(
+                ["/usr/sbin/tcpdump", "-U", "-l", "-n", "-i", iface,
+                 "udp and src port 53", "-vv"],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,
+                text=True,
+                bufsize=1
+            )
+
+            for line in proc.stdout:
+                # Only process lines with A record queries
+                qm = QUERY_RE.search(line)
+                if not qm:
+                    continue
+
+                query_domain = qm.group(1).lower()
+                answer_ips = ANSWER_RE.findall(line)
+
+                if answer_ips:
+                    process_sniffed_dns(query_domain, answer_ips)
+
+        except Exception as e:
+            log(f"[sniff] Error on {iface}: {e}", syslog.LOG_ERR)
+
+        if proc:
+            try:
+                proc.kill()
+            except Exception:
+                pass
+        log(f"[sniff] tcpdump on {iface} exited, restarting in 5s...")
+        time.sleep(5)
+
+
+def resolve_via_unbound(domain):
+    """Resolve a domain using drill via the local Unbound instance."""
+    ips = set()
+    try:
+        result = subprocess.run(
+            ["/usr/bin/drill", f"@{UNBOUND_ADDR}", "-p", str(UNBOUND_PORT),
+             domain, "A"],
+            capture_output=True, text=True, timeout=10
+        )
+        in_answer = False
+        for line in result.stdout.splitlines():
+            if line.startswith(";; ANSWER SECTION:"):
+                in_answer = True
+                continue
+            if in_answer:
+                if line.startswith(";;") or not line.strip():
+                    break
+                parts = line.split()
+                if len(parts) >= 5 and parts[3] == "A":
+                    ip = parts[4]
+                    try:
+                        ipaddress.ip_address(ip)
+                        ips.add(ip)
+                    except ValueError:
+                        pass
+    except (subprocess.TimeoutExpired, OSError):
+        pass
+    return ips
+
+
 def resolve_and_update():
-    """Resolve all configured domains via Unbound and add IPs + /24 subnets to pf tables."""
+    """Active resolution via drill as backup. Resolves bare + www. variants."""
     if not domain_table_map:
-        log("No domain mappings loaded, skipping resolution")
         return 0
 
-    # Group domains by table
     table_domains = {}
     for domain, table in domain_table_map.items():
         table_domains.setdefault(table, []).append(domain)
@@ -192,9 +320,6 @@ def resolve_and_update():
     for table, domains in table_domains.items():
         addrs = set()
         for domain in domains:
-            # Resolve both bare domain and www. subdomain
-            # CDNs often return different IPs (e.g. iqiyi.com -> domestic,
-            # www.iqiyi.com -> Akamai)
             variants = [domain]
             if not domain.startswith("www."):
                 variants.append(f"www.{domain}")
@@ -202,16 +327,14 @@ def resolve_and_update():
                 ips = resolve_via_unbound(variant)
                 for ip in ips:
                     addrs.add(ip)
-                    # Add /24 subnet for CDN coverage
                     addrs.add(str(ipaddress.ip_network(f"{ip}/24", strict=False)))
 
         added = add_to_table(table, addrs)
         if added > 0:
             total_added += added
             all_new_ips.update(addrs)
-            log(f"Added {added} new entries to {table}")
+            log(f"[resolve] Added {added} new entries to {table}")
 
-    # Kill stale states so existing connections get re-routed
     if all_new_ips:
         client_ips = get_client_ips()
         if client_ips:
@@ -220,27 +343,20 @@ def resolve_and_update():
     return total_added
 
 
-def cleanup(signum=None, frame=None):
-    log("DNS watcher stopped")
-    sys.exit(0)
-
-
-def run_daemon():
-    """Main daemon loop: resolve domains periodically."""
-    log(f"Resolving via Unbound ({UNBOUND_ADDR}:{UNBOUND_PORT}) every {RESOLVE_INTERVAL}s")
-
-    # Initial full resolution
-    added = resolve_and_update()
-    log(f"Initial resolution: {added} new entries added")
-
+def active_resolve_loop():
+    """Background thread: periodic active resolution as fallback."""
     while True:
         time.sleep(RESOLVE_INTERVAL)
         try:
-            # Reload mappings periodically (picks up config changes)
             load_domain_mappings()
             resolve_and_update()
         except Exception as e:
-            log(f"Resolution cycle error: {e}", syslog.LOG_ERR)
+            log(f"Active resolution error: {e}", syslog.LOG_ERR)
+
+
+def cleanup(signum=None, frame=None):
+    log("DNS watcher stopped")
+    sys.exit(0)
 
 
 def main():
@@ -255,8 +371,31 @@ def main():
         load_domain_mappings()
         log(f"DNS watcher started (PID {os.getpid()})")
 
+        # Detect LAN interfaces for DNS sniffing
+        interfaces = detect_lan_interfaces()
+        if not interfaces:
+            log("No LAN interfaces detected, sniffing disabled",
+                syslog.LOG_WARNING)
+
+        # Initial active resolution to seed tables
+        added = resolve_and_update()
+        log(f"Initial resolution: {added} new entries added")
+
+        # Start DNS sniffers on each LAN interface
+        for iface in interfaces:
+            t = threading.Thread(target=sniff_interface, args=(iface,),
+                                daemon=True)
+            t.start()
+
+        # Start periodic active resolution (backup, every 5 min)
+        resolver_thread = threading.Thread(target=active_resolve_loop,
+                                          daemon=True)
+        resolver_thread.start()
+
+        # Main thread stays alive
         try:
-            run_daemon()
+            while True:
+                time.sleep(60)
         except Exception as e:
             log(f"DNS watcher crashed: {e}", syslog.LOG_ERR)
             sys.exit(1)
