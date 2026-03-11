@@ -100,6 +100,56 @@ class ServiceController extends ApiMutableServiceControllerBase
     public function statusAction()
     {
         $backend = new Backend();
+        $watcherResponse = trim($backend->configdRun('approuter dns_watcher_status'));
+        $watcherData = json_decode($watcherResponse, true);
+        $running = is_array($watcherData) && !empty($watcherData['running']);
+        return [
+            'status' => $running ? 'running' : 'stopped',
+            'widget' => [
+                'caption_restart' => gettext('Restart'),
+                'caption_start' => gettext('Start'),
+                'caption_stop' => gettext('Stop'),
+            ],
+        ];
+    }
+
+    public function startAction()
+    {
+        $status = "failed";
+        if ($this->request->isPost()) {
+            $backend = new Backend();
+            $backend->configdRun('approuter dns_watcher_start');
+            $status = "ok";
+        }
+        return ['status' => $status];
+    }
+
+    public function stopAction()
+    {
+        $status = "failed";
+        if ($this->request->isPost()) {
+            $backend = new Backend();
+            $backend->configdRun('approuter dns_watcher_stop');
+            $status = "ok";
+        }
+        return ['status' => $status];
+    }
+
+    public function restartAction()
+    {
+        $status = "failed";
+        if ($this->request->isPost()) {
+            $backend = new Backend();
+            $backend->configdRun('approuter dns_watcher_stop');
+            $backend->configdRun('approuter dns_watcher_start');
+            $status = "ok";
+        }
+        return ['status' => $status];
+    }
+
+    public function detailStatusAction()
+    {
+        $backend = new Backend();
 
         // Basic status from list_updater
         $response = trim($backend->configdRun('approuter status'));
@@ -115,48 +165,95 @@ class ServiceController extends ApiMutableServiceControllerBase
         $data['dns_resolver'] = (string)$mdl->general->dnsResolver ?: 'dnsmasq';
         $data['enabled'] = (string)$mdl->general->enabled;
 
-        // pf table stats — count entries in each approuter table
+        // Build rule description lookup: hash(uuid) => description
+        $ruleDescriptions = [];
         $tablePrefix = (string)$mdl->general->tablePrefix ?: 'approuter';
+        foreach ($mdl->rules->rule->iterateItems() as $uuid => $rule) {
+            $hash = substr(md5($uuid), 0, 8);
+            $ruleDescriptions[$hash] = (string)$rule->description ?: 'Rule ' . $hash;
+        }
+
+        // pf table stats — count entries in each approuter table, hide clients_* tables
         $tables = [];
+        $tableLines = [];
         exec("/sbin/pfctl -s Tables 2>/dev/null", $tableLines);
         foreach ($tableLines as $line) {
             $tbl = trim($line);
-            if (strpos($tbl, $tablePrefix . '_') === 0) {
+            if (strpos($tbl, $tablePrefix . '_') === 0 && strpos($tbl, $tablePrefix . '_clients_') !== 0) {
                 $count = 0;
+                $entries = [];
                 exec("/sbin/pfctl -t " . escapeshellarg($tbl) . " -T show 2>/dev/null", $entries);
                 $count = count(array_filter($entries, function ($e) {
                     return trim($e) !== '';
                 }));
                 $tables[$tbl] = $count;
-                unset($entries);
             }
         }
         $data['pf_tables'] = $tables;
 
-        // Rule match stats — how many packets/bytes each approuter rule has matched
+        // Rule match stats with human-readable descriptions
         $ruleStats = [];
+        $ruleLines = [];
         exec("/sbin/pfctl -s rules -v 2>/dev/null", $ruleLines);
         $currentRule = '';
         foreach ($ruleLines as $line) {
             if (strpos($line, 'approuter') !== false && strpos($line, 'route-to') !== false) {
                 $currentRule = trim($line);
             } elseif (!empty($currentRule) && preg_match('/\[\s*Evaluations:\s*(\d+)\s*Packets:\s*(\d+)\s*Bytes:\s*(\d+)/', $line, $m)) {
+                // Extract human-readable description from pf rule label
+                $description = $currentRule;
+                // Try to extract table names and gateway from the rule
+                if (preg_match('/route-to\s+\((\S+)\s+([^)]+)\)/', $currentRule, $gm)) {
+                    $gwName = $gm[1];
+                }
+                // Extract destination table name to get category
+                $destTable = '';
+                if (preg_match('/to\s+<(' . preg_quote($tablePrefix, '/') . '_[^>]+)>/', $currentRule, $dm)) {
+                    $destTable = $dm[1];
+                }
+                // Build readable description: "RuleDesc -> category (gateway)"
+                $readable = $destTable;
+                // Try to match rule UUID hash from client table or label
+                foreach ($ruleDescriptions as $hash => $desc) {
+                    if (strpos($currentRule, $hash) !== false) {
+                        $readable = $desc;
+                        if (!empty($destTable)) {
+                            // Strip prefix for cleaner display
+                            $shortDest = str_replace($tablePrefix . '_', '', $destTable);
+                            $readable .= ' -> ' . $shortDest;
+                        }
+                        break;
+                    }
+                }
+                if (isset($gwName) && !empty($gwName)) {
+                    $readable .= ' via ' . $gwName;
+                }
+
                 $ruleStats[] = [
-                    'rule' => $currentRule,
+                    'rule' => $readable,
                     'evaluations' => (int)$m[1],
                     'packets' => (int)$m[2],
                     'bytes' => (int)$m[3],
                 ];
                 $currentRule = '';
+                unset($gwName);
             }
         }
         $data['rule_stats'] = $ruleStats;
 
-        // Recent dns_watcher log entries
+        // Recent log entries: syslog + dns_watcher log
         $logs = [];
-        exec("grep -i 'approuter' /var/log/system/latest.log 2>/dev/null | tail -30", $logLines);
-        foreach ($logLines as $line) {
+        $syslogLines = [];
+        exec("grep -i 'approuter' /var/log/system/latest.log 2>/dev/null | tail -20", $syslogLines);
+        foreach ($syslogLines as $line) {
             $logs[] = $line;
+        }
+        $snifferLogs = [];
+        exec("tail -20 /var/log/approuter_dns_watcher.log 2>/dev/null", $snifferLogs);
+        foreach ($snifferLogs as $line) {
+            if (!empty(trim($line))) {
+                $logs[] = '[sniffer] ' . $line;
+            }
         }
         $data['recent_logs'] = $logs;
 
