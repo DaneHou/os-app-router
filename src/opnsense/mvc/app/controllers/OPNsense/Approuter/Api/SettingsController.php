@@ -55,10 +55,15 @@ class SettingsController extends ApiMutableModelControllerBase
         $result = $this->getBase('rule', 'rules.rule', $uuid);
 
         if (isset($result['rule'])) {
+            // CSVListField may return an array of {value, selected} entries
+            // instead of a plain string. Normalize text fields to strings.
+            $result['rule']['sourceNets'] = $this->extractCsvValue($result['rule']['sourceNets'] ?? '');
+            $result['rule']['customDomains'] = $this->extractCsvValue($result['rule']['customDomains'] ?? '');
+
             // Augment gateway: TextField → dropdown options
             // Uses configctl with timeout to prevent hanging (configd socket can block)
             try {
-                $gwValue = is_string($result['rule']['gateway']) ? $result['rule']['gateway'] : '';
+                $gwValue = $this->extractCsvValue($result['rule']['gateway'] ?? '');
                 $gwOptions = ['' => ['value' => '(none)', 'selected' => empty($gwValue) ? 1 : 0]];
                 $gwLines = [];
                 exec('timeout 3 configctl interface gateways status 2>/dev/null', $gwLines);
@@ -98,7 +103,7 @@ class SettingsController extends ApiMutableModelControllerBase
 
             // Augment categories: CSVListField → select_multiple options
             try {
-                $catValue = is_string($result['rule']['categories']) ? $result['rule']['categories'] : '';
+                $catValue = $this->extractCsvValue($result['rule']['categories'] ?? '');
                 $catSelected = array_filter(array_map('trim', explode(',', $catValue)));
                 $categories = $this->getCategoriesAction();
                 $catOptions = [];
@@ -112,11 +117,30 @@ class SettingsController extends ApiMutableModelControllerBase
             } catch (\Throwable $e) {
                 // Keep categories as plain text if augmentation fails
             }
-
-            // sourceNets: plain text field, no augmentation needed
         }
 
         return $result;
+    }
+
+    /**
+     * Extract a string value from a field that may be returned as either
+     * a plain string or a CSVListField array of {value, selected} entries.
+     */
+    private function extractCsvValue($field)
+    {
+        if (is_string($field)) {
+            return $field;
+        }
+        if (is_array($field)) {
+            $selected = [];
+            foreach ($field as $key => $data) {
+                if (is_array($data) && !empty($data['selected'])) {
+                    $selected[] = $key;
+                }
+            }
+            return implode(',', $selected);
+        }
+        return '';
     }
 
     public function addRuleAction()
