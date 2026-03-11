@@ -76,7 +76,7 @@
                 <Required>N</Required>
             </chinaDomainUrl>
             <chinaCidrUrl type="UrlField">
-                <Default>https://raw.githubusercontent.com/ruijzhan/chnroute/master/chnroute.txt</Default>
+                <Default>https://raw.githubusercontent.com/misakaio/chnroutes2/master/chnroutes.txt</Default>
                 <Required>N</Required>
             </chinaCidrUrl>
             <customDomains type="TextField">

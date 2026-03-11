@@ -93,6 +93,9 @@ function approuter_firewall(\OPNsense\Firewall\Plugin $fw)
         }
     }
 
+    // Track valid client file basenames for orphan cleanup
+    $validClientFiles = [];
+
     // Generate pf filter rules
     $priority = 1;
     foreach ($rules as $rule) {
@@ -116,6 +119,7 @@ function approuter_firewall(\OPNsense\Firewall\Plugin $fw)
                 'file' => $clientFile,
                 'persist' => true,
             ]);
+            $validClientFiles[] = $clientTableName . '.txt';
             $fromClause = '<' . $clientTableName . '>';
         }
 
@@ -168,6 +172,13 @@ function approuter_firewall(\OPNsense\Firewall\Plugin $fw)
                 ]
             );
             $priority++;
+        }
+    }
+
+    // Clean up orphaned client table files from deleted rules
+    foreach (glob($clientsDir . '/' . $tablePrefix . '_clients_*.txt') as $file) {
+        if (!in_array(basename($file), $validClientFiles)) {
+            @unlink($file);
         }
     }
 }
