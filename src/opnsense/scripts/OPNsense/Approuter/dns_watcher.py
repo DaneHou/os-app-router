@@ -252,7 +252,10 @@ def sniff_interface(iface):
                 bufsize=1
             )
 
-            for line in proc.stdout:
+            while True:
+                line = proc.stdout.readline()
+                if not line:
+                    break
                 # Only process lines with A record queries
                 qm = QUERY_RE.search(line)
                 if not qm:
