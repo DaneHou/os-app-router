@@ -10,6 +10,7 @@ Route traffic from specific LAN clients through designated gateways based on dom
 - **Per-client Rules**: Apply routing only to specific LAN IPs/subnets, or to all traffic
 - **Custom Domains**: Add per-rule custom domains beyond built-in categories
 - **Auto-updating Lists**: Scheduled fetching of domain and CIDR lists from remote sources
+- **Service Control**: Start/stop/restart DNS watcher directly from the UI with live status indicator
 - **Web UI**: Full OPNsense MVC integration with settings, rule management, and live status dashboard
 - **pf Table Integration**: Native FreeBSD packet filter tables for zero-copy routing decisions
 
@@ -127,9 +128,9 @@ CDN domains (Akamai, Cloudflare, etc.) return different IPs based on resolver lo
 
 ### China CIDR list not loading
 
-The default source is `misakaio/chnroutes2`. If it fails:
+The default source is `misakaio/chnroutes2`. If the configured URL fails, the plugin automatically falls back to the built-in default URL. If both fail:
 1. Check **Status** tab for error messages in logs
-2. Try a custom CIDR URL in **List Sources**
+2. Update the CIDR URL in **List Sources** (the old `ruijzhan/chnroute` URL is no longer available)
 3. Run **Force Full Update**
 
 ### Service won't start
@@ -167,7 +168,7 @@ src/
 ├── opnsense/mvc/app/
 │   ├── controllers/.../Api/
 │   │   ├── SettingsController.php  # CRUD for rules/settings
-│   │   └── ServiceController.php   # reconfigure, status, start/stop
+│   │   └── ServiceController.php   # reconfigure, status, start/stop/restart
 │   ├── models/.../Approuter.xml    # XML schema (settings, rules, lists)
 │   └── views/.../index.volt        # Single-page UI
 └── opnsense/scripts/.../Approuter/
