@@ -4,6 +4,8 @@ AppRouter DNS Watcher
 Periodically resolves configured domains and updates pf tables with
 their IP addresses. Also adds /24 subnets for CDN coverage.
 Works with any DNS resolver without special logging configuration.
+
+Designed to run as a foreground process under FreeBSD daemon(8).
 """
 
 import ipaddress
@@ -18,7 +20,7 @@ import syslog
 from pathlib import Path
 
 CONFIG_DIR = "/usr/local/etc/app-router/unbound.d"
-PID_FILE = "/var/run/approuter_dns_watcher.pid"
+CLIENTS_DIR = Path("/usr/local/etc/app-router/clients")
 LOG_FILE = "/var/log/approuter_dns_watcher.log"
 RESOLVE_INTERVAL = 30  # seconds between full resolution cycles
 
@@ -27,12 +29,9 @@ domain_table_map = {}
 
 def log(msg, level=syslog.LOG_INFO):
     try:
-        syslog.openlog("approuter-dns", syslog.LOG_PID, syslog.LOG_DAEMON)
         syslog.syslog(level, msg)
-        syslog.closelog()
     except Exception:
         pass
-    # Also log to file (syslog may not work after daemonize on FreeBSD)
     try:
         with open(LOG_FILE, "a") as f:
             t = time.strftime("%Y-%m-%d %H:%M:%S")
@@ -62,6 +61,38 @@ def load_domain_mappings():
     log(f"Loaded {len(domain_table_map)} domain mappings from {CONFIG_DIR}")
 
 
+def get_client_ips():
+    """Read client IPs from approuter client table files."""
+    client_ips = set()
+    if CLIENTS_DIR.is_dir():
+        for f in CLIENTS_DIR.glob("approuter_clients_*.txt"):
+            for line in f.read_text().splitlines():
+                ip = line.strip().split('/')[0]
+                if ip and not ip.startswith('#'):
+                    client_ips.add(ip)
+    return client_ips
+
+
+def kill_stale_states(new_ips, client_ips):
+    """Kill existing pf states so new connections use the route-to rule."""
+    if not new_ips or not client_ips:
+        return
+    killed = 0
+    for client in client_ips:
+        for dest in new_ips:
+            try:
+                result = subprocess.run(
+                    ["/sbin/pfctl", "-k", client, "-k", dest],
+                    capture_output=True, timeout=5
+                )
+                if result.returncode == 0:
+                    killed += 1
+            except (subprocess.TimeoutExpired, OSError):
+                pass
+    if killed:
+        log(f"Killed stale states for {len(new_ips)} new IPs x {len(client_ips)} clients")
+
+
 def resolve_and_update():
     """Resolve all configured domains and add IPs + /24 subnets to pf tables."""
     if not domain_table_map:
@@ -74,6 +105,7 @@ def resolve_and_update():
         table_domains.setdefault(table, []).append(domain)
 
     total_added = 0
+    all_new_ips = set()
     for table, domains in table_domains.items():
         ips = set()
         subnets = set()
@@ -106,25 +138,23 @@ def resolve_and_update():
                         added = int(parts[0].strip())
                         if added > 0:
                             total_added += added
+                            all_new_ips.update(addrs)
                             log(f"Added {added} new entries to {table}")
             except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as e:
                 log(f"Failed to add IPs to {table}: {e}", syslog.LOG_ERR)
 
+    # Kill stale states so existing connections get re-routed
+    if all_new_ips:
+        client_ips = get_client_ips()
+        if client_ips:
+            kill_stale_states(all_new_ips, client_ips)
+
     return total_added
 
 
-def write_pid():
-    with open(PID_FILE, "w") as f:
-        f.write(str(os.getpid()))
-
-
 def cleanup(signum=None, frame=None):
-    try:
-        os.unlink(PID_FILE)
-    except OSError:
-        pass
     log("DNS watcher stopped")
-    os._exit(0)
+    sys.exit(0)
 
 
 def run_daemon():
@@ -145,81 +175,47 @@ def run_daemon():
             log(f"Resolution cycle error: {e}", syslog.LOG_ERR)
 
 
-def daemonize():
-    """Double-fork to detach from parent process (configd)."""
-    pid = os.fork()
-    if pid > 0:
-        os._exit(0)
-    os.setsid()
-    pid = os.fork()
-    if pid > 0:
-        os._exit(0)
-    # Redirect fds without closing Python file objects first
-    devnull = os.open(os.devnull, os.O_RDWR)
-    os.dup2(devnull, 0)
-    os.dup2(devnull, 1)
-    os.dup2(devnull, 2)
-    if devnull > 2:
-        os.close(devnull)
-
-
 def main():
     action = sys.argv[1] if len(sys.argv) > 1 else "start"
 
     if action == "start":
-        # Stop existing instance if running
-        if os.path.exists(PID_FILE):
-            try:
-                with open(PID_FILE) as f:
-                    old_pid = int(f.read().strip())
-                os.kill(old_pid, signal.SIGTERM)
-                time.sleep(0.5)
-            except (ProcessLookupError, ValueError, OSError):
-                pass
-            try:
-                os.unlink(PID_FILE)
-            except OSError:
-                pass
-
-        daemonize()
+        # Open syslog once for the lifetime of the process
+        syslog.openlog("approuter-dns", syslog.LOG_PID, syslog.LOG_DAEMON)
+        signal.signal(signal.SIGTERM, cleanup)
+        signal.signal(signal.SIGINT, cleanup)
+        load_domain_mappings()
+        log(f"DNS watcher started (PID {os.getpid()})")
         try:
-            signal.signal(signal.SIGTERM, cleanup)
-            signal.signal(signal.SIGINT, cleanup)
-            write_pid()
-            load_domain_mappings()
-            log(f"DNS watcher started (PID {os.getpid()})")
             run_daemon()
         except Exception as e:
             log(f"DNS watcher crashed: {e}", syslog.LOG_ERR)
-            try:
-                os.unlink(PID_FILE)
-            except OSError:
-                pass
-            os._exit(1)
+            sys.exit(1)
 
     elif action == "stop":
-        if os.path.exists(PID_FILE):
-            with open(PID_FILE) as f:
+        pid_file = "/var/run/approuter_dns_watcher.pid"
+        if os.path.exists(pid_file):
+            with open(pid_file) as f:
                 pid = int(f.read().strip())
             try:
                 os.kill(pid, signal.SIGTERM)
                 print(f"Stopped DNS watcher (PID {pid})")
             except ProcessLookupError:
                 print("DNS watcher not running")
-                os.unlink(PID_FILE)
+                os.unlink(pid_file)
         else:
             print("DNS watcher not running")
 
     elif action == "status":
-        if os.path.exists(PID_FILE):
-            with open(PID_FILE) as f:
+        pid_file = "/var/run/approuter_dns_watcher.pid"
+        if os.path.exists(pid_file):
+            with open(pid_file) as f:
                 pid = int(f.read().strip())
             try:
                 os.kill(pid, 0)
                 print(json.dumps({"running": True, "pid": pid}))
             except ProcessLookupError:
                 print(json.dumps({"running": False}))
-                os.unlink(PID_FILE)
+                os.unlink(pid_file)
         else:
             print(json.dumps({"running": False}))
 
