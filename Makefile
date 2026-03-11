@@ -162,9 +162,10 @@ uninstall-all: uninstall
 	@rm -rf /tmp/opnsense_volt_templates 2>/dev/null || true
 	@rm -rf /var/cache/opnsense 2>/dev/null || true
 	@# Remove Approuter config from config.xml (OPNsense model data)
-	@if command -v configctl >/dev/null 2>&1; then \
-		echo ">>> Note: AppRouter settings in config.xml must be removed manually via:"; \
-		echo ">>>   Edit /conf/config.xml and remove the <Approuter> section under <OPNsense>"; \
+	@if [ -f /conf/config.xml ]; then \
+		cp /conf/config.xml /conf/config.xml.pre-approuter-uninstall; \
+		sed -i '' '/<Approuter>/,/<\/Approuter>/d' /conf/config.xml; \
+		echo ">>> Removed <Approuter> from config.xml (backup: config.xml.pre-approuter-uninstall)"; \
 	fi
 	@# Restart services to clear all state
 	@service configd restart 2>/dev/null || true
