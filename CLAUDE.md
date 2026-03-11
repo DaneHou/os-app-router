@@ -32,7 +32,7 @@ Web UI (Volt/jQuery) → REST API (PHP Controllers) → configd actions → Pyth
 **PHP MVC Layer** (`src/opnsense/mvc/app/`):
 - `models/OPNsense/Approuter/Approuter.xml` — XML schema defining settings, rules, and lists. Central config structure.
 - `controllers/.../Api/SettingsController.php` — CRUD for rules/settings. Extends `ApiMutableModelControllerBase`. Augments getRule with gateway dropdown and category multi-select from `app_categories.json`.
-- `controllers/.../Api/ServiceController.php` — reconfigure (Apply), updateLists, forceUpdate, status. Extends `ApiMutableServiceControllerBase`.
+- `controllers/.../Api/ServiceController.php` — reconfigure (Apply), updateLists, forceUpdate, status/detailStatus, start/stop/restart. Extends `ApiMutableServiceControllerBase`. Custom `statusAction` checks dns_watcher via configd and returns `widget` section for `updateServiceControlUI()`.
 - `views/.../index.volt` — Single-page UI with Bootstrap/jQuery, uses OPNsense bootgrid for rule table.
 
 **Plugin Hooks** (`src/etc/inc/plugins.inc.d/approuter.inc`):
@@ -42,8 +42,8 @@ Web UI (Volt/jQuery) → REST API (PHP Controllers) → configd actions → Pyth
 - `approuter_syslog()` — Registers log facilities
 
 **Backend Scripts** (`src/opnsense/scripts/OPNsense/Approuter/`):
-- `list_updater.py` — Fetches remote domain/CIDR lists, aggregates CIDRs, writes pf table files
-- `dns_watcher.py` — Daemon monitoring Unbound logs, resolves domains → IPs into pf tables
+- `list_updater.py` — Fetches remote domain/CIDR lists (with fallback URLs), v2fly domains, aggregates CIDRs, generates DNS configs, writes pf table files
+- `dns_watcher.py` — Daemon sniffing DNS responses via tcpdump on LAN interfaces, adds resolved IPs to pf tables. Also runs periodic active resolution via `drill` as fallback.
 - `table_manager.sh` — Shell wrapper for `pfctl` table operations
 - `app_categories.json` — Built-in domain definitions (categories → apps → domains)
 
@@ -60,13 +60,22 @@ Web UI (Volt/jQuery) → REST API (PHP Controllers) → configd actions → Pyth
 /api/approuter/settings/{searchRule,getRule,addRule,setRule,delRule,toggleRule}  — Rule CRUD
 /api/approuter/settings/getCategories                — Category list from app_categories.json
 /api/approuter/settings/getGateways                  — Gateway list from Routing model
-/api/approuter/service/{reconfigure,updateLists,forceUpdate,status}  — Service operations
+/api/approuter/service/{reconfigure,updateLists,forceUpdate}          — Service operations
+/api/approuter/service/{status,start,stop,restart}                   — Service control (used by updateServiceControlUI)
+/api/approuter/service/detailStatus                                  — Detailed status (pf tables, rule stats, logs)
 ```
 
 ### Dual DNS Modes
 
 - **Dnsmasq**: Native ipset support — domains resolved directly into pf tables at DNS query time
-- **Unbound**: `dns_watcher.py` daemon tails resolver log, parses A/AAAA answers, adds IPs to tables via pfctl
+- **Unbound**: `dns_watcher.py` daemon sniffs DNS responses via tcpdump, parses A/AAAA answers, adds IPs to tables via pfctl
+
+### UI Conventions
+
+- `updateServiceControlUI('approuter')` — OPNsense standard service widget (green/red indicator + start/stop/restart). Requires `statusAction` to return `{status, widget}` format.
+- Bootgrid URLs for UUID-based endpoints (get/set/del/toggle) must have trailing `/` — OPNsense bootgrid appends UUID directly to the URL string.
+- Tab persistence via URL hash (`#general`, `#rules`, `#lists`, `#status`).
+- `loadStatus()` defined inside `$(document).ready` — use jQuery `.click()` handler, not inline `onclick`.
 
 ## Platform Conventions
 
