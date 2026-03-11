@@ -34,9 +34,8 @@ RESOLVE_INTERVAL = 300  # active resolution every 5 min (backup only)
 
 domain_table_map = {}
 
-# Unbound reply log pattern:
-# [1234567890] unbound[pid]: info: 192.168.1.1 www.iqiyi.com. A IN NOERROR 0.001 0 23.67.33.35
-# The clog binary-log format when read via pipe may vary; we match the key fields.
+# Unbound reply log format (RFC5424 syslog on OPNsense):
+# <30>1 2026-03-10T21:52:54-06:00 OPNsense unbound 13671 - [...] [pid:0] info: 192.168.1.1 www.iqiyi.com. A IN NOERROR 0.001 0 23.67.33.35
 REPLY_RE = re.compile(
     r'info:\s+'
     r'[\d.]+\s+'              # client IP
@@ -162,23 +161,30 @@ def process_dns_reply(domain, ip):
 
 
 def tail_unbound_log():
-    """Tail Unbound log using clog (FreeBSD circular log) and process replies."""
+    """Tail Unbound log file and process DNS replies in real time."""
     log(f"Starting Unbound log watcher on {UNBOUND_LOG}")
 
     while True:
+        proc = None
         try:
-            # Use clog -f to tail the circular log file
+            # Resolve symlink to get actual file path
+            real_path = os.path.realpath(UNBOUND_LOG)
+            if not os.path.exists(real_path):
+                log(f"Unbound log not found: {real_path}", syslog.LOG_WARNING)
+                time.sleep(10)
+                continue
+
             proc = subprocess.Popen(
-                ["/usr/sbin/clog", "-f", UNBOUND_LOG],
+                ["/usr/bin/tail", "-F", UNBOUND_LOG],
                 stdout=subprocess.PIPE,
                 stderr=subprocess.DEVNULL,
                 text=True,
-                bufsize=1  # line buffered
+                bufsize=1
             )
-            log("Unbound log tail started")
+            log(f"Unbound log tail started on {real_path}")
 
             for line in proc.stdout:
-                if "reply:" not in line and "info:" not in line:
+                if "info:" not in line:
                     continue
                 m = REPLY_RE.search(line)
                 if not m:
@@ -187,18 +193,17 @@ def tail_unbound_log():
                 qtype = m.group(2)
                 answer_ip = m.group(3)
 
-                # Only process A records for IPv4 (our pf rules are IPv4)
                 if qtype == 'A' and domain in domain_table_map:
                     process_dns_reply(domain, answer_ip)
 
         except Exception as e:
             log(f"Log tail error: {e}", syslog.LOG_ERR)
 
-        # If clog exits or errors, wait and retry
-        try:
-            proc.kill()
-        except Exception:
-            pass
+        if proc:
+            try:
+                proc.kill()
+            except Exception:
+                pass
         log("Unbound log tail exited, restarting in 5s...")
         time.sleep(5)
 
