@@ -192,11 +192,18 @@ def resolve_and_update():
     for table, domains in table_domains.items():
         addrs = set()
         for domain in domains:
-            ips = resolve_via_unbound(domain)
-            for ip in ips:
-                addrs.add(ip)
-                # Add /24 subnet for CDN coverage
-                addrs.add(str(ipaddress.ip_network(f"{ip}/24", strict=False)))
+            # Resolve both bare domain and www. subdomain
+            # CDNs often return different IPs (e.g. iqiyi.com -> domestic,
+            # www.iqiyi.com -> Akamai)
+            variants = [domain]
+            if not domain.startswith("www."):
+                variants.append(f"www.{domain}")
+            for variant in variants:
+                ips = resolve_via_unbound(variant)
+                for ip in ips:
+                    addrs.add(ip)
+                    # Add /24 subnet for CDN coverage
+                    addrs.add(str(ipaddress.ip_network(f"{ip}/24", strict=False)))
 
         added = add_to_table(table, addrs)
         if added > 0:
