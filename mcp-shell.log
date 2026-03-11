@@ -1,0 +1,7 @@
+{"level":"info","message":"MCP Shell Server started","timestamp":"2026-03-11T02:28:41.707Z"}
+{"level":"info","message":"Shell: /bin/bash","timestamp":"2026-03-11T02:28:41.708Z"}
+{"level":"info","message":"Working Directory: /home/dianxun","timestamp":"2026-03-11T02:28:41.708Z"}
+{"level":"info","message":"Platform: linux","timestamp":"2026-03-11T02:28:41.708Z"}
+{"level":"info","message":"Hostname: AiServer","timestamp":"2026-03-11T02:28:41.708Z"}
+{"level":"info","message":"Username: dianxun","timestamp":"2026-03-11T02:28:41.708Z"}
+{"level":"info","message":"MCP Shell Server ready","timestamp":"2026-03-11T02:28:41.709Z"}

@@ -76,6 +76,7 @@ install-plugin:
 	@# Data directories
 	@mkdir -p $(PLUGIN_CONF)/domains
 	@mkdir -p $(PLUGIN_CONF)/cidrs
+	@mkdir -p $(PLUGIN_CONF)/clients
 	@mkdir -p $(PLUGIN_CONF)/dnsmasq.d
 	@mkdir -p $(PLUGIN_CONF)/unbound.d
 	@# Runtime directories
