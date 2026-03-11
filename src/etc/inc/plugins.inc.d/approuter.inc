@@ -93,8 +93,9 @@ function approuter_firewall(\OPNsense\Firewall\Plugin $fw)
         }
     }
 
-    // Track valid client file basenames for orphan cleanup
+    // Track valid client file basenames and custom table names for orphan cleanup
     $validClientFiles = [];
+    $validCustomTables = [];
 
     // Generate pf filter rules
     $priority = 1;
@@ -129,6 +130,7 @@ function approuter_firewall(\OPNsense\Firewall\Plugin $fw)
             $fw->registerTable($customTableName, [
                 'persist' => true,
             ]);
+            $validCustomTables[] = $customTableName;
 
             $description = 'AppRouter: ' . ($rule['description'] ?: 'custom domains') . ' via ' . $rule['gateway'];
             $fw->registerFilterRule(
@@ -179,6 +181,22 @@ function approuter_firewall(\OPNsense\Firewall\Plugin $fw)
     foreach (glob($clientsDir . '/' . $tablePrefix . '_clients_*.txt') as $file) {
         if (!in_array(basename($file), $validClientFiles)) {
             @unlink($file);
+        }
+    }
+
+    // Clean up orphaned custom/client pf tables from deleted rules
+    $pfTables = [];
+    exec('/sbin/pfctl -s Tables 2>/dev/null', $pfTables);
+    foreach ($pfTables as $t) {
+        $t = trim($t);
+        if (preg_match('/_custom_[0-9a-f]{8}$/', $t) && !in_array($t, $validCustomTables)) {
+            exec('/sbin/pfctl -t ' . escapeshellarg($t) . ' -T flush 2>/dev/null');
+            exec('/sbin/pfctl -t ' . escapeshellarg($t) . ' -T kill 2>/dev/null');
+            syslog(LOG_NOTICE, "approuter: removed orphaned table $t");
+        } elseif (preg_match('/_clients_[0-9a-f]{8}$/', $t) && !in_array($t . '.txt', $validClientFiles)) {
+            exec('/sbin/pfctl -t ' . escapeshellarg($t) . ' -T flush 2>/dev/null');
+            exec('/sbin/pfctl -t ' . escapeshellarg($t) . ' -T kill 2>/dev/null');
+            syslog(LOG_NOTICE, "approuter: removed orphaned table $t");
         }
     }
 }
