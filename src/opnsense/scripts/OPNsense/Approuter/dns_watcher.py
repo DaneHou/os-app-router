@@ -131,7 +131,10 @@ def load_domain_mappings():
                 data = json.load(f)
             table = data.get("table", "")
             for domain in data.get("domains", []):
-                new_map[domain.lower().rstrip('.')] = table
+                key = domain.lower().rstrip('.')
+                if key not in new_map:
+                    new_map[key] = set()
+                new_map[key].add(table)
         except (json.JSONDecodeError, IOError) as e:
             log(f"Error loading {config_file}: {e}", syslog.LOG_ERR)
 
@@ -141,18 +144,19 @@ def load_domain_mappings():
 
 def match_domain(query_domain):
     """Check if query_domain or any parent domain is in our domain list.
-    Returns the matching table name or None.
-    e.g. pcw-data.video.iqiyi.com -> matches iqiyi.com -> approuter_video_iqiyi
+    Returns a set of matching table names, or empty set.
+    e.g. pcw-data.video.iqiyi.com -> matches iqiyi.com -> {approuter_video, approuter_video_iqiyi}
     """
     query_domain = query_domain.lower().rstrip('.')
     parts = query_domain.split('.')
-    # Try progressively shorter domain suffixes
+    tables = set()
+    # Try progressively shorter domain suffixes, collect ALL matching tables
     for i in range(len(parts)):
         candidate = '.'.join(parts[i:])
-        table = domain_table_map.get(candidate)
-        if table:
-            return table
-    return None
+        matched = domain_table_map.get(candidate)
+        if matched:
+            tables.update(matched)
+    return tables
 
 
 def get_client_ips():
@@ -203,9 +207,9 @@ def kill_stale_states(new_ips, client_ips):
 
 
 def process_sniffed_dns(query_domain, answer_ips):
-    """Process a sniffed DNS response: match domain, add IPs to pf table."""
-    table = match_domain(query_domain)
-    if not table:
+    """Process a sniffed DNS response: match domain, add IPs to all matching pf tables."""
+    tables = match_domain(query_domain)
+    if not tables:
         return
 
     addrs = set()
@@ -222,9 +226,13 @@ def process_sniffed_dns(query_domain, answer_ips):
         return
 
     with table_lock:
-        added = add_to_table(table, addrs)
-        if added > 0:
-            log(f"[sniff] Added {added} entries to {table} for {query_domain}")
+        total_added = 0
+        for table in tables:
+            added = add_to_table(table, addrs)
+            if added > 0:
+                total_added += added
+                log(f"[sniff] Added {added} entries to {table} for {query_domain}")
+        if total_added > 0:
             client_ips = get_client_ips()
             if client_ips:
                 kill_stale_states(addrs, client_ips)
@@ -314,9 +322,11 @@ def resolve_and_update():
     if not domain_table_map:
         return 0
 
+    # Collect domains per table (a domain may belong to multiple tables)
     table_domains = {}
-    for domain, table in domain_table_map.items():
-        table_domains.setdefault(table, []).append(domain)
+    for domain, tables in domain_table_map.items():
+        for table in tables:
+            table_domains.setdefault(table, []).append(domain)
 
     total_added = 0
     all_new_ips = set()
