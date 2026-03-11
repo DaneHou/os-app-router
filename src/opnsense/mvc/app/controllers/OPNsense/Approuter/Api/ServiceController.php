@@ -56,6 +56,16 @@ class ServiceController extends ApiMutableServiceControllerBase
 
             $backend->configdRun('filter reload');
 
+            // Explicitly load client tables from files (OPNsense registerTable
+            // creates persist tables but doesn't always load file contents)
+            $clientsDir = '/usr/local/etc/app-router/clients';
+            if (is_dir($clientsDir)) {
+                foreach (glob($clientsDir . '/*.txt') as $clientFile) {
+                    $tableName = basename($clientFile, '.txt');
+                    exec("/sbin/pfctl -t " . escapeshellarg($tableName) . " -T replace -f " . escapeshellarg($clientFile));
+                }
+            }
+
             // Always start dns_watcher (warmup_tables works in both DNS modes)
             $backend->configdRun('approuter dns_watcher_start');
 
