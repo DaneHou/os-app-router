@@ -103,7 +103,14 @@ class ServiceController extends ApiMutableServiceControllerBase
         $watcherResponse = trim($backend->configdRun('approuter dns_watcher_status'));
         $watcherData = json_decode($watcherResponse, true);
         $running = is_array($watcherData) && !empty($watcherData['running']);
-        return ['status' => $running ? 'running' : 'stopped'];
+        return [
+            'status' => $running ? 'running' : 'stopped',
+            'widget' => [
+                'caption_restart' => gettext('Restart'),
+                'caption_start' => gettext('Start'),
+                'caption_stop' => gettext('Stop'),
+            ],
+        ];
     }
 
     public function startAction()

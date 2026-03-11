@@ -27,9 +27,6 @@
             window.location.hash = e.target.hash;
         });
 
-        // Service status control (green/red indicator + stop/restart buttons)
-        updateServiceControlUI('approuter');
-
         // Both forms share the same model endpoint - load once, populate both
         var data_get_map = {
             'frm_GeneralSettings': "/api/approuter/settings/get",
@@ -90,6 +87,9 @@
                 $("#RuleChangeMessage").addClass("hidden");
             });
         });
+
+        // Service status control (green/red indicator + stop/restart buttons)
+        updateServiceControlUI('approuter');
 
         loadStatus();
 
@@ -180,6 +180,10 @@
                 }
             });
         }
+
+        $("#refreshStatusAct").click(function() {
+            loadStatus();
+        });
     });
 </script>
 
@@ -270,7 +274,7 @@
                     <p>{{ lang._('Loading...') }}</p>
                 </div>
                 <hr />
-                <button class="btn btn-default" id="refreshStatusAct" type="button" onclick="loadStatus()">
+                <button class="btn btn-default" id="refreshStatusAct" type="button">
                     <b>{{ lang._('Refresh') }}</b> <i class="fa fa-refresh"></i>
                 </button>
             </div>
