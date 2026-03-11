@@ -71,8 +71,9 @@ install-plugin:
 		$(PLUGIN_SERVICE)/templates/OPNsense/Approuter/+TARGETS
 	@cp src/opnsense/service/templates/OPNsense/Approuter/approuter.conf \
 		$(PLUGIN_SERVICE)/templates/OPNsense/Approuter/approuter.conf
-	@cp src/opnsense/service/templates/OPNsense/Approuter/approuter_unbound.conf \
-		$(PLUGIN_SERVICE)/templates/OPNsense/Approuter/approuter_unbound.conf
+	@# Remove stale Unbound config from previous versions
+	@rm -f /var/unbound/etc/approuter.conf 2>/dev/null || true
+	@rm -f $(PLUGIN_SERVICE)/templates/OPNsense/Approuter/approuter_unbound.conf 2>/dev/null || true
 	@# Data directories
 	@mkdir -p $(PLUGIN_CONF)/domains
 	@mkdir -p $(PLUGIN_CONF)/cidrs
@@ -125,6 +126,8 @@ uninstall:
 	@rm -f $(PLUGIN_SERVICE)/conf/actions.d/actions_approuter.conf
 	@# Remove service templates
 	@rm -rf $(PLUGIN_SERVICE)/templates/OPNsense/Approuter
+	@# Remove generated Unbound config
+	@rm -f /var/unbound/etc/approuter.conf 2>/dev/null || true
 	@# Remove plugin hook
 	@rm -f $(PLUGIN_HOOK)/approuter.inc
 	@# Clean caches and runtime state (these cause issues on reinstall)

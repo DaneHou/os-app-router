@@ -48,7 +48,7 @@
                     <ValidationMessage>Enter "any", interface nets, aliases, or IP/subnet addresses</ValidationMessage>
                 </sourceNets>
                 <categories type="CSVListField">
-                    <Required>Y</Required>
+                    <Required>N</Required>
                     <FieldSeparator>,</FieldSeparator>
                     <Mask>/^[a-z0-9_.,]+$/</Mask>
                     <ValidationMessage>Select at least one app category</ValidationMessage>
@@ -56,6 +56,11 @@
                 <gateway type="TextField">
                     <Required>Y</Required>
                 </gateway>
+                <customDomains type="TextField">
+                    <Required>N</Required>
+                    <Mask>/^[a-z0-9_.,\-]*$/i</Mask>
+                    <ValidationMessage>Enter comma-separated domains</ValidationMessage>
+                </customDomains>
                 <interface type="InterfaceField">
                     <Required>Y</Required>
                     <Default>lan</Default>

@@ -65,6 +65,7 @@ function approuter_firewall(\OPNsense\Firewall\Plugin $fw)
             'description' => (string)$rule->description,
             'sourceNets' => (string)$rule->sourceNets,
             'categories' => $ruleCategories,
+            'customDomains' => (string)$rule->customDomains,
             'gateway' => (string)$rule->gateway,
             'interface' => (string)$rule->interface,
         ];
@@ -116,6 +117,31 @@ function approuter_firewall(\OPNsense\Firewall\Plugin $fw)
                 'persist' => true,
             ]);
             $fromClause = '<' . $clientTableName . '>';
+        }
+
+        // Register custom domains table if rule has customDomains
+        if (!empty($rule['customDomains'])) {
+            $customTableName = $tablePrefix . '_custom_' . substr(md5($rule['uuid']), 0, 8);
+            $fw->registerTable($customTableName, [
+                'persist' => true,
+            ]);
+
+            $description = 'AppRouter: ' . ($rule['description'] ?: 'custom domains') . ' via ' . $rule['gateway'];
+            $fw->registerFilterRule(
+                $priority,
+                [
+                    'from' => $fromClause,
+                    'to' => '<' . $customTableName . '>',
+                    'gateway' => $rule['gateway'],
+                    'direction' => 'in',
+                    'interface' => $rule['interface'],
+                    'descr' => $description,
+                    'quick' => true,
+                    'log' => false,
+                    '#ref' => 'approuter:' . $rule['uuid'] . ':custom',
+                ]
+            );
+            $priority++;
         }
 
         foreach ($rule['categories'] as $category) {

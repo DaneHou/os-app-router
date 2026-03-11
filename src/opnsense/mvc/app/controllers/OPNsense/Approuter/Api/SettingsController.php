@@ -45,7 +45,7 @@ class SettingsController extends ApiMutableModelControllerBase
     {
         return $this->searchBase(
             'rules.rule',
-            ['enabled', 'description', 'sourceNets', 'categories', 'gateway', 'interface'],
+            ['enabled', 'description', 'sourceNets', 'categories', 'customDomains', 'gateway', 'interface'],
             'description'
         );
     }

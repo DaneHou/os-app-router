@@ -296,7 +296,7 @@ def generate_dnsmasq_conf(categories, table_prefix="approuter", v2fly_merged=Non
     log(f"Generated Dnsmasq configs for {len(categories)} categories")
 
 
-def generate_unbound_conf(categories, table_prefix="approuter", v2fly_merged=None):
+def generate_unbound_conf(categories, table_prefix="approuter", v2fly_merged=None, config=None):
     """Generate Unbound domain-to-table mapping files per category and per app."""
     v2fly_merged = v2fly_merged or {}
     for cat_id, cat_data in categories.items():
@@ -329,6 +329,36 @@ def generate_unbound_conf(categories, table_prefix="approuter", v2fly_merged=Non
                 write_if_changed(app_filepath, json.dumps(app_mapping, indent=2) + "\n")
 
     log(f"Generated Unbound configs for {len(categories)} categories")
+
+    # Generate custom domain mapping files from rules
+    if config:
+        generate_custom_domain_mappings(config, table_prefix)
+
+
+def generate_custom_domain_mappings(config, table_prefix="approuter"):
+    """Generate Unbound mapping files for per-rule custom domains."""
+    rules = config.get("rules", [])
+    custom_count = 0
+    for rule in rules:
+        custom_str = rule.get("custom_domains", "").strip()
+        if not custom_str:
+            continue
+        domains = [d.strip().lower() for d in custom_str.split(",") if d.strip()]
+        if not domains:
+            continue
+        # Match PHP hook: substr(md5(uuid), 0, 8)
+        rule_uuid = rule.get("uuid", "")
+        rule_id = hashlib.md5(rule_uuid.encode()).hexdigest()[:8]
+        table_name = f"{table_prefix}_custom_{rule_id}"
+        mapping = {
+            "table": table_name,
+            "domains": sorted(domains)
+        }
+        filepath = os.path.join(UNBOUND_DIR, f"approuter_custom_{rule_id}.json")
+        write_if_changed(filepath, json.dumps(mapping, indent=2) + "\n")
+        custom_count += 1
+    if custom_count:
+        log(f"Generated {custom_count} custom domain mapping files")
 
 
 def update_remote_lists(config, state):
@@ -433,7 +463,7 @@ def main():
                     all_domains.update(app_domains)
             write_domain_file(cat_id, all_domains)
         generate_dnsmasq_conf(categories, v2fly_merged=v2fly_merged)
-        generate_unbound_conf(categories, v2fly_merged=v2fly_merged)
+        generate_unbound_conf(categories, v2fly_merged=v2fly_merged, config=config)
         state["last_full_update"] = int(time.time())
         save_state(state)
         if updated or v2fly_merged:
@@ -442,7 +472,7 @@ def main():
 
     elif action == "generate_dns":
         generate_dnsmasq_conf(categories)
-        generate_unbound_conf(categories)
+        generate_unbound_conf(categories, config=config)
         log("DNS configs regenerated")
 
     elif action == "status":
@@ -466,7 +496,7 @@ def main():
                     all_domains.update(app_domains)
             write_domain_file(cat_id, all_domains)
         generate_dnsmasq_conf(categories, v2fly_merged=v2fly_merged)
-        generate_unbound_conf(categories, v2fly_merged=v2fly_merged)
+        generate_unbound_conf(categories, v2fly_merged=v2fly_merged, config=config)
         state["last_full_update"] = int(time.time())
         save_state(state)
         update_tables()
