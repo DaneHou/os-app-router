@@ -1,5 +1,7 @@
 # os-app-router: Application-Aware Routing for OPNsense
 
+English | [中文](README_CN.md)
+
 Route traffic from specific LAN clients through designated gateways based on domain/CIDR categories. For example, route all Chinese video streaming through WAN2 while everything else goes through WAN1.
 
 ## Features
@@ -8,9 +10,10 @@ Route traffic from specific LAN clients through designated gateways based on dom
 - **DNS Sniffer**: Real-time capture of DNS responses via tcpdump for reliable CDN IP detection
 - **CIDR List Support**: Static IP range routing using community-maintained lists (chnroutes2, etc.)
 - **Per-client Rules**: Apply routing only to specific LAN IPs/subnets, or to all traffic
-- **Custom Domains**: Add per-rule custom domains beyond built-in categories
+- **Custom Domains**: Add per-rule custom domains beyond built-in categories (works in both DNS modes, subdomains auto-matched)
 - **Auto-updating Lists**: Scheduled fetching of domain and CIDR lists from remote sources
 - **Service Control**: Start/stop/restart DNS watcher directly from the UI with live status indicator
+- **Custom Domains Column**: Rules table shows custom domains at a glance for quick reference
 - **Web UI**: Full OPNsense MVC integration with settings, rule management, and live status dashboard
 - **pf Table Integration**: Native FreeBSD packet filter tables for zero-copy routing decisions
 
@@ -74,11 +77,16 @@ rm -rf /usr/local/etc/app-router
 3. Go to the **Routing Rules** tab and add a rule:
    - **Description**: Human-readable name (e.g., "China traffic via WAN2")
    - **Interface**: Inbound interface (typically LAN)
-   - **Source**: `any` or comma-separated IPs/subnets (e.g., `192.168.1.0/24`)
+   - **Source**: Client filter — examples:
+     - `any` — all clients
+     - `192.168.1.100` — single IP
+     - `192.168.1.100,192.168.1.200` — multiple IPs
+     - `192.168.1.0/24` — subnet
+     - `192.168.1.0/24,10.0.0.5` — mixed IPs and subnets
    - **App Categories**: Select categories (e.g., `Video (All)`, `iQIYI`, `Bilibili`)
-   - **Custom Domains**: Optional extra domains for this rule
+   - **Custom Domains**: Optional extra domains for this rule (works in both Dnsmasq and Unbound modes; subdomains are auto-matched, e.g., `ustc.edu.cn` also matches `test.ustc.edu.cn`)
    - **Gateway**: Target gateway for matched traffic
-4. Click **Save**, then **Apply**
+4. Click **Save**, then **Apply** (this automatically starts the service — no need to manually click Start)
 5. Go to **List Sources** and click **Update Lists Now**
 
 ## DNS Modes
