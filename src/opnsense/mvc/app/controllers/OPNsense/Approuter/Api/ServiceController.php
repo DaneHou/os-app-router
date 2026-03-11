@@ -60,10 +60,10 @@ class ServiceController extends ApiMutableServiceControllerBase
                 }
             }
 
-            // Always start dns_watcher (warmup_tables works in both DNS modes)
+            // Restart dns_watcher: stop first to clear stale PID, then start fresh.
+            // After start, signal SIGHUP to reload domain mappings immediately.
+            $backend->configdRun('approuter dns_watcher_stop');
             $backend->configdRun('approuter dns_watcher_start');
-
-            // Signal dns_watcher to reload domain mappings immediately
             $backend->configdRun('approuter dns_watcher_reload');
 
             // Trigger list update in background (non-blocking) if lists don't exist yet
