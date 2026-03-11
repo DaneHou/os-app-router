@@ -65,8 +65,8 @@ def resolve_and_update():
         for domain in domains:
             try:
                 results = socket.getaddrinfo(
-                    domain, None, socket.AF_UNSPEC,
-                    socket.SOCK_STREAM, 0, socket.AI_ADDRCONFIG
+                    domain, None, socket.AF_INET,
+                    socket.SOCK_STREAM
                 )
                 for family, _, _, _, sockaddr in results:
                     ips.add(sockaddr[0])
@@ -104,7 +104,7 @@ def cleanup(signum=None, frame=None):
     except OSError:
         pass
     log("DNS watcher stopped")
-    sys.exit(0)
+    os._exit(0)
 
 
 def run_daemon():
@@ -127,18 +127,19 @@ def daemonize():
     """Double-fork to detach from parent process (configd)."""
     pid = os.fork()
     if pid > 0:
-        sys.exit(0)
+        os._exit(0)
     os.setsid()
     pid = os.fork()
     if pid > 0:
-        sys.exit(0)
-    sys.stdin.close()
-    sys.stdout.close()
-    sys.stderr.close()
+        os._exit(0)
+    # Redirect fds without closing Python file objects first
+    # (closing sys.stdout/stderr can crash Python internals)
     devnull = os.open(os.devnull, os.O_RDWR)
     os.dup2(devnull, 0)
     os.dup2(devnull, 1)
     os.dup2(devnull, 2)
+    if devnull > 2:
+        os.close(devnull)
 
 
 def main():
@@ -160,12 +161,20 @@ def main():
                 pass
 
         daemonize()
-        signal.signal(signal.SIGTERM, cleanup)
-        signal.signal(signal.SIGINT, cleanup)
-        write_pid()
-        load_domain_mappings()
-        log("DNS watcher started")
-        run_daemon()
+        try:
+            signal.signal(signal.SIGTERM, cleanup)
+            signal.signal(signal.SIGINT, cleanup)
+            write_pid()
+            load_domain_mappings()
+            log("DNS watcher started")
+            run_daemon()
+        except Exception as e:
+            log(f"DNS watcher crashed: {e}", syslog.LOG_ERR)
+            try:
+                os.unlink(PID_FILE)
+            except OSError:
+                pass
+            os._exit(1)
 
     elif action == "stop":
         if os.path.exists(PID_FILE):
