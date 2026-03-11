@@ -93,18 +93,24 @@ activate:
 	@# Verify PHP syntax
 	@find $(PLUGIN_MVC)/controllers/OPNsense/Approuter -name '*.php' -exec php -l {} \; 2>&1 | grep -v "No syntax errors" || true
 	@find $(PLUGIN_MVC)/models/OPNsense/Approuter -name '*.php' -exec php -l {} \; 2>&1 | grep -v "No syntax errors" || true
+	@# Kill any old dns_watcher before restarting services
+	@pkill -f 'dns_watcher.py' 2>/dev/null || true
+	@rm -f /var/run/approuter_dns_watcher.pid 2>/dev/null || true
 	@# Restart configd to register new actions
 	@service configd restart 2>/dev/null || echo "Note: configd not running (dev environment?)"
 	@# Restart php-fpm to clear opcache (ensures new PHP code is loaded)
 	@service php-fpm restart 2>/dev/null || true
-	@echo ">>> Plugin activated."
+	@echo ">>> Plugin activated. Click Apply in the UI to start dns_watcher."
 
 uninstall:
 	@echo ">>> Uninstalling $(PLUGIN_NAME)..."
-	@# Stop DNS watcher if running
+	@# Stop DNS watcher if running (kill directly, don't rely on script)
 	@if [ -f /var/run/approuter_dns_watcher.pid ]; then \
-		$(PLUGIN_SCRIPTS)/dns_watcher.py stop 2>/dev/null || true; \
+		kill `cat /var/run/approuter_dns_watcher.pid` 2>/dev/null || true; \
+		rm -f /var/run/approuter_dns_watcher.pid; \
 	fi
+	@# Also kill any orphan dns_watcher processes
+	@pkill -f 'dns_watcher.py' 2>/dev/null || true
 	@# Flush pf tables to remove stale routing state
 	@/sbin/pfctl -s Tables 2>/dev/null | grep "^approuter_" | while read table; do \
 		/sbin/pfctl -t "$$table" -T flush 2>/dev/null || true; \
