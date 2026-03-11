@@ -17,7 +17,7 @@ import syslog
 from pathlib import Path
 
 UNBOUND_DIR = "/usr/local/etc/app-router/unbound.d"
-UNBOUND_LOG = "/var/log/resolver.log"
+UNBOUND_LOG = "/var/log/resolver/latest.log"
 PID_FILE = "/var/run/approuter_dns_watcher.pid"
 
 domain_table_map = {}

@@ -42,7 +42,9 @@ function approuter_firewall(\OPNsense\Firewall\Plugin $fw)
     $tablePrefix = (string)$mdl->general->tablePrefix ?: 'approuter';
     $cidrsDir = '/usr/local/etc/app-router/cidrs';
     $clientsDir = '/usr/local/etc/app-router/clients';
-    @mkdir($clientsDir, 0750, true);
+    if (!is_dir($clientsDir)) {
+        mkdir($clientsDir, 0750, true);
+    }
 
     $categoriesNeeded = [];
     $rules = [];
@@ -105,7 +107,10 @@ function approuter_firewall(\OPNsense\Firewall\Plugin $fw)
         if (!$isAny) {
             $clientTableName = $tablePrefix . '_clients_' . substr(md5($rule['uuid']), 0, 8);
             $clientFile = $clientsDir . '/' . $clientTableName . '.txt';
-            file_put_contents($clientFile, implode("\n", $sourceNets) . "\n");
+            $written = file_put_contents($clientFile, implode("\n", $sourceNets) . "\n");
+            if ($written === false) {
+                syslog(LOG_ERR, "approuter: failed to write client file $clientFile");
+            }
             $fw->registerTable($clientTableName, [
                 'file' => $clientFile,
                 'persist' => true,

@@ -7,6 +7,7 @@ Runs via configd cron to keep routing data up to date.
 
 import json
 import os
+import socket
 import sys
 import subprocess
 import time
@@ -16,6 +17,12 @@ import urllib.error
 import syslog
 import hashlib
 from pathlib import Path
+
+# Force IPv4 for all network operations (workaround for broken IPv6 on some systems)
+_orig_getaddrinfo = socket.getaddrinfo
+def _getaddrinfo_ipv4(host, port, family=0, type=0, proto=0, flags=0):
+    return _orig_getaddrinfo(host, port, socket.AF_INET, type, proto, flags)
+socket.getaddrinfo = _getaddrinfo_ipv4
 
 BASE_DIR = "/usr/local/etc/app-router"
 DOMAINS_DIR = os.path.join(BASE_DIR, "domains")
@@ -35,9 +42,9 @@ DEFAULT_SOURCES = {
         "description": "China accelerated domains (felixonmars)"
     },
     "china_cidrs_v4": {
-        "url": "https://raw.githubusercontent.com/ruijzhan/chnroute/master/chnroute.txt",
+        "url": "https://raw.githubusercontent.com/misakaio/chnroutes2/master/chnroutes.txt",
         "type": "cidr",
-        "description": "China IPv4 CIDR blocks (APNIC)"
+        "description": "China IPv4 CIDR blocks (chnroutes2)"
     }
 }
 
@@ -126,14 +133,14 @@ def parse_cidr_list(content):
 
 def fetch_v2fly_domains(name, depth=0):
     """Fetch and parse a v2fly/domain-list-community data file.
-    Returns a set of domain suffixes. Follows include: directives up to depth 3.
+    Returns a set of domain suffixes. Follows include: directives up to depth 1.
     Skips @ads tagged entries, keyword:, and regexp: entries.
     """
-    if depth > 3:
+    if depth > 1:
         return set()
     url = f"{V2FLY_BASE_URL}/{name}"
     try:
-        content, _, _ = fetch_url(url, timeout=15)
+        content, _, _ = fetch_url(url, timeout=10)
     except Exception as e:
         log(f"Failed to fetch v2fly/{name}: {e}", syslog.LOG_WARNING)
         return set()
