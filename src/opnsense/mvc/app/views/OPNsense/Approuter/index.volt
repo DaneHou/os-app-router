@@ -85,6 +85,7 @@
             ajaxCall(url="/api/approuter/service/reconfigure", sendData={}, callback=function(data,status) {
                 $("#reconfigureAct_progress").removeClass("fa fa-spinner fa-pulse");
                 $("#RuleChangeMessage").addClass("hidden");
+                updateServiceControlUI('approuter');
             });
         });
 
@@ -216,6 +217,7 @@
                     <th data-column-id="description" data-type="string">{{ lang._('Description') }}</th>
                     <th data-column-id="sourceNets" data-type="string">{{ lang._('Source') }}</th>
                     <th data-column-id="categories" data-type="string">{{ lang._('Categories') }}</th>
+                    <th data-column-id="customDomains" data-type="string">{{ lang._('Custom Domains') }}</th>
                     <th data-column-id="gateway" data-type="string">{{ lang._('Gateway') }}</th>
                     <th data-column-id="interface" data-type="string">{{ lang._('Interface') }}</th>
                     <th data-column-id="commands" data-width="7em" data-formatter="commands" data-sortable="false">{{ lang._('Commands') }}</th>

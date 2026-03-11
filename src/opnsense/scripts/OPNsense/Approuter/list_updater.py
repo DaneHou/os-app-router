@@ -361,6 +361,31 @@ def generate_custom_domain_mappings(config, table_prefix="approuter"):
         log(f"Generated {custom_count} custom domain mapping files")
 
 
+def generate_dnsmasq_custom_conf(config, table_prefix="approuter"):
+    """Generate Dnsmasq ipset config for per-rule custom domains."""
+    rules = config.get("rules", [])
+    custom_count = 0
+    for rule in rules:
+        custom_str = rule.get("custom_domains", "").strip()
+        if not custom_str:
+            continue
+        domains = [d.strip().lower() for d in custom_str.split(",") if d.strip()]
+        if not domains:
+            continue
+        rule_uuid = rule.get("uuid", "")
+        rule_id = hashlib.md5(rule_uuid.encode()).hexdigest()[:8]
+        table_name = f"{table_prefix}_custom_{rule_id}"
+        lines = [f"# AppRouter: custom domains for rule {rule_id}",
+                 "# Auto-generated - do not edit"]
+        for domain in sorted(domains):
+            lines.append(f"ipset=/{domain}/{table_name}")
+        filepath = os.path.join(DNSMASQ_DIR, f"approuter_custom_{rule_id}.conf")
+        write_if_changed(filepath, "\n".join(lines) + "\n")
+        custom_count += 1
+    if custom_count:
+        log(f"Generated {custom_count} Dnsmasq custom domain configs")
+
+
 def update_remote_lists(config, state):
     sources = config.get("sources", DEFAULT_SOURCES)
     custom_sources = config.get("custom_sources", [])
@@ -482,6 +507,7 @@ def main():
                     all_domains.update(app_domains)
             write_domain_file(cat_id, all_domains)
         generate_dnsmasq_conf(categories, v2fly_merged=v2fly_merged)
+        generate_dnsmasq_custom_conf(config)
         generate_unbound_conf(categories, v2fly_merged=v2fly_merged, config=config)
         state["last_full_update"] = int(time.time())
         save_state(state)
@@ -491,6 +517,7 @@ def main():
 
     elif action == "generate_dns":
         generate_dnsmasq_conf(categories)
+        generate_dnsmasq_custom_conf(config)
         generate_unbound_conf(categories, config=config)
         log("DNS configs regenerated")
 
@@ -515,6 +542,7 @@ def main():
                     all_domains.update(app_domains)
             write_domain_file(cat_id, all_domains)
         generate_dnsmasq_conf(categories, v2fly_merged=v2fly_merged)
+        generate_dnsmasq_custom_conf(config)
         generate_unbound_conf(categories, v2fly_merged=v2fly_merged, config=config)
         state["last_full_update"] = int(time.time())
         save_state(state)
