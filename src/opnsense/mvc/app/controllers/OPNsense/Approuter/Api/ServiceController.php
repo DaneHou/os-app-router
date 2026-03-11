@@ -51,16 +51,17 @@ class ServiceController extends ApiMutableServiceControllerBase
             if (!file_exists('/usr/local/etc/app-router/cidrs/china_all.txt')) {
                 $backend->configdRun('approuter update_lists');
             }
-            $backend->configdRun('filter reload');
 
-            // Start/restart dns_watcher if in unbound mode
+            // Reload Unbound if in unbound mode (picks up log-replies config)
             $mdl = new Approuter();
             if ((string)$mdl->general->dnsResolver === 'unbound') {
-                $backend->configdRun('approuter dns_watcher_start');
-            } else {
-                // Stop watcher if switching away from unbound
-                $backend->configdRun('approuter dns_watcher_stop');
+                $backend->configdRun('dns reload');
             }
+
+            $backend->configdRun('filter reload');
+
+            // Always start dns_watcher (warmup_tables works in both DNS modes)
+            $backend->configdRun('approuter dns_watcher_start');
 
             $status = "ok";
         }

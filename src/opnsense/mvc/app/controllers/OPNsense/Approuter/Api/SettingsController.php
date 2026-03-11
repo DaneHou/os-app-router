@@ -55,36 +55,26 @@ class SettingsController extends ApiMutableModelControllerBase
         $result = $this->getBase('rule', 'rules.rule', $uuid);
 
         if (isset($result['rule'])) {
-            // Augment gateway: TextField → dropdown options (lightweight, no configd)
+            // Augment gateway: TextField → dropdown options
+            // Uses getGatewaysAction() which fetches via configd (includes dynamic gateways like FRP_GW)
             try {
                 $gwValue = is_string($result['rule']['gateway']) ? $result['rule']['gateway'] : '';
                 $gwOptions = ['' => ['value' => '(none)', 'selected' => empty($gwValue) ? 1 : 0]];
-                // Use Routing model directly — fast PHP-only call, no configd socket
-                $gwModel = new \OPNsense\Routing\Gateways();
-                foreach ($gwModel->gateway_item->iterateItems() as $gwUuid => $gw) {
-                    if ((string)$gw->disabled === '1') {
-                        continue;
-                    }
-                    $name = (string)$gw->name;
-                    if (empty($name)) {
-                        continue;
-                    }
+                $gatewayData = $this->getGatewaysAction();
+                foreach ($gatewayData['rows'] as $gw) {
+                    $name = $gw['name'];
                     $label = $name;
-                    $descr = (string)$gw->descr;
-                    $addr = (string)$gw->gateway;
-                    if (!empty($descr)) {
-                        $label .= ' (' . $descr . ')';
+                    if (!empty($gw['descr'])) {
+                        $label .= ' (' . $gw['descr'] . ')';
                     }
-                    if (!empty($addr)) {
-                        $label .= ' [' . $addr . ']';
+                    if (!empty($gw['gateway'])) {
+                        $label .= ' [' . $gw['gateway'] . ']';
                     }
                     $gwOptions[$name] = [
                         'value' => $label,
                         'selected' => ($name === $gwValue) ? 1 : 0,
                     ];
                 }
-                // If the currently selected gateway isn't in the model (e.g. dynamic gateway),
-                // add it so it still shows as selected
                 if (!empty($gwValue) && !isset($gwOptions[$gwValue])) {
                     $gwOptions[$gwValue] = [
                         'value' => $gwValue,

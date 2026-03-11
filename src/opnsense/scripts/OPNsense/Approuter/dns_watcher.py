@@ -8,6 +8,7 @@ domains are resolved. Used as fallback when Dnsmasq ipset is not available.
 import json
 import os
 import re
+import socket
 import subprocess
 import sys
 import time
@@ -72,6 +73,42 @@ def add_ip_to_table(table_name, ip):
         return True
     except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
         return False
+
+
+def warmup_tables():
+    """Pre-resolve all configured domains and add IPs to pf tables on startup."""
+    if not domain_table_map:
+        return
+    # Group domains by table for batch logging
+    table_domains = {}
+    for domain, table in domain_table_map.items():
+        table_domains.setdefault(table, []).append(domain)
+
+    total_added = 0
+    for table, domains in table_domains.items():
+        ips = set()
+        for domain in domains:
+            try:
+                results = socket.getaddrinfo(domain, None, socket.AF_UNSPEC, socket.SOCK_STREAM, 0, socket.AI_ADDRCONFIG)
+                for family, _, _, _, sockaddr in results:
+                    ips.add(sockaddr[0])
+            except (socket.gaierror, OSError):
+                pass
+        if ips:
+            # Batch add all IPs to the table in one pfctl call
+            try:
+                subprocess.run(
+                    ["/sbin/pfctl", "-t", table, "-T", "add"] + list(ips),
+                    check=True,
+                    capture_output=True,
+                    timeout=10
+                )
+                total_added += len(ips)
+            except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as e:
+                log(f"Warmup: failed to add IPs to {table}: {e}", syslog.LOG_ERR)
+        log(f"Warmup: {table} — {len(domains)} domains, {len(ips)} IPs added")
+
+    log(f"Warmup complete: {total_added} IPs added to tables")
 
 
 def parse_unbound_log_line(line):
@@ -186,6 +223,7 @@ def main():
         write_pid()
         load_domain_mappings()
         log("DNS watcher started")
+        warmup_tables()
         watch_log()
 
     elif action == "reload":

@@ -4,6 +4,7 @@
         "apps": {
             "bilibili": {
                 "label": "Bilibili 哔哩哔哩",
+                "v2fly": "bilibili",
                 "domains": [
                     "bilibili.com",
                     "hdslb.com",
@@ -15,6 +16,7 @@
             },
             "douyin": {
                 "label": "Douyin 抖音",
+                "v2fly": "douyin",
                 "domains": [
                     "douyin.com",
                     "tiktokv.com",
@@ -30,15 +32,17 @@
             },
             "iqiyi": {
                 "label": "iQIYI 爱奇艺",
+                "v2fly": "iqiyi",
                 "domains": [
                     "iqiyi.com",
                     "qy.net",
                     "iqiyipic.com",
-                    "71.am.com"
+                    "71.am"
                 ]
             },
             "youku": {
                 "label": "Youku 优酷",
+                "v2fly": "youku",
                 "domains": [
                     "youku.com",
                     "ykimg.com",
@@ -63,6 +67,7 @@
             },
             "letv": {
                 "label": "LeTV 乐视",
+                "v2fly": "le",
                 "domains": [
                     "le.com",
                     "letv.com"
@@ -70,6 +75,7 @@
             },
             "sohu": {
                 "label": "Sohu Video 搜狐视频",
+                "v2fly": "sohu",
                 "domains": [
                     "sohu.com",
                     "sohutv.com"
@@ -77,6 +83,7 @@
             },
             "acfun": {
                 "label": "AcFun A站",
+                "v2fly": "acfun",
                 "domains": [
                     "acfun.cn",
                     "aixifan.com"
@@ -89,6 +96,7 @@
         "apps": {
             "weibo": {
                 "label": "Weibo 微博",
+                "v2fly": "sina",
                 "domains": [
                     "weibo.com",
                     "sinaimg.cn",
@@ -105,6 +113,7 @@
             },
             "xiaohongshu": {
                 "label": "Xiaohongshu 小红书",
+                "v2fly": "xiaohongshu",
                 "domains": [
                     "xiaohongshu.com",
                     "xhscdn.com",
@@ -113,6 +122,7 @@
             },
             "zhihu": {
                 "label": "Zhihu 知乎",
+                "v2fly": "zhihu",
                 "domains": [
                     "zhihu.com",
                     "zhimg.com"
@@ -120,6 +130,7 @@
             },
             "douban": {
                 "label": "Douban 豆瓣",
+                "v2fly": "douban",
                 "domains": [
                     "douban.com",
                     "doubanio.com"
@@ -147,6 +158,7 @@
         "apps": {
             "taobao": {
                 "label": "Taobao 淘宝",
+                "v2fly": "alibaba",
                 "domains": [
                     "taobao.com",
                     "tmall.com",
@@ -159,6 +171,7 @@
             },
             "jd": {
                 "label": "JD 京东",
+                "v2fly": "jd",
                 "domains": [
                     "jd.com",
                     "jdcloud.com",
@@ -168,6 +181,7 @@
             },
             "pinduoduo": {
                 "label": "Pinduoduo 拼多多",
+                "v2fly": "pinduoduo",
                 "domains": [
                     "pinduoduo.com",
                     "yangkeduo.com"
@@ -175,6 +189,7 @@
             },
             "suning": {
                 "label": "Suning 苏宁",
+                "v2fly": "suning",
                 "domains": [
                     "suning.com"
                 ]
@@ -188,12 +203,14 @@
             },
             "dangdang": {
                 "label": "Dangdang 当当",
+                "v2fly": "dangdang",
                 "domains": [
                     "dangdang.com"
                 ]
             },
             "mogujie": {
                 "label": "Mogujie 蘑菇街",
+                "v2fly": "mogujie",
                 "domains": [
                     "mogujie.com"
                 ]
@@ -220,12 +237,14 @@
             },
             "kugou": {
                 "label": "Kugou 酷狗音乐",
+                "v2fly": "kugou",
                 "domains": [
                     "kugou.com"
                 ]
             },
             "kuwo": {
                 "label": "Kuwo 酷我音乐",
+                "v2fly": "kuwo",
                 "domains": [
                     "kuwo.cn"
                 ]
@@ -249,6 +268,7 @@
         "apps": {
             "mihoyo": {
                 "label": "miHoYo 米哈游",
+                "v2fly": "mihoyo",
                 "domains": [
                     "mihoyo.com",
                     "hoyoverse.com",
@@ -267,6 +287,7 @@
             },
             "netease": {
                 "label": "NetEase Games 网易游戏",
+                "v2fly": "netease",
                 "domains": [
                     "netease.com",
                     "163.com"
@@ -274,6 +295,7 @@
             },
             "4399": {
                 "label": "4399 小游戏",
+                "v2fly": "4399",
                 "domains": [
                     "4399.com"
                 ]

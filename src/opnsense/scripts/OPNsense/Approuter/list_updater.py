@@ -26,6 +26,8 @@ CATEGORIES_FILE = "/usr/local/opnsense/scripts/OPNsense/Approuter/app_categories
 CONFIG_FILE = os.path.join(BASE_DIR, "config.json")
 STATE_FILE = os.path.join(BASE_DIR, "state.json")
 
+V2FLY_BASE_URL = "https://raw.githubusercontent.com/v2fly/domain-list-community/master/data"
+
 DEFAULT_SOURCES = {
     "china_domains": {
         "url": "https://raw.githubusercontent.com/felixonmars/dnsmasq-china-list/master/accelerated-domains.china.conf",
@@ -122,6 +124,82 @@ def parse_cidr_list(content):
     return cidrs
 
 
+def fetch_v2fly_domains(name, depth=0):
+    """Fetch and parse a v2fly/domain-list-community data file.
+    Returns a set of domain suffixes. Follows include: directives up to depth 3.
+    Skips @ads tagged entries, keyword:, and regexp: entries.
+    """
+    if depth > 3:
+        return set()
+    url = f"{V2FLY_BASE_URL}/{name}"
+    try:
+        content, _, _ = fetch_url(url, timeout=15)
+    except Exception as e:
+        log(f"Failed to fetch v2fly/{name}: {e}", syslog.LOG_WARNING)
+        return set()
+
+    domains = set()
+    if not content:
+        return domains
+
+    for line in content.strip().split("\n"):
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        # Skip ads-tagged entries
+        if "@ads" in line:
+            continue
+        # Handle include directives
+        if line.startswith("include:"):
+            inc_name = line.split(":")[1].strip().split()[0]
+            domains.update(fetch_v2fly_domains(inc_name, depth + 1))
+            continue
+        # Skip keyword and regexp entries
+        if line.startswith("keyword:") or line.startswith("regexp:"):
+            continue
+        # Strip full: prefix and @attributes
+        entry = line
+        if entry.startswith("full:"):
+            entry = entry[5:]
+        # Remove @attr tags
+        if " @" in entry or "\t@" in entry:
+            entry = entry.split()[0]
+        entry = entry.strip().lower()
+        if entry:
+            domains.add(entry)
+
+    return domains
+
+
+def update_v2fly_domains(categories, state):
+    """Fetch v2fly domain lists for apps that have a 'v2fly' field.
+    Merges remote domains with local fallback domains.
+    Returns dict of {cat_id.app_id: merged_domains_set}.
+    """
+    merged = {}
+    for cat_id, cat_data in categories.items():
+        if "apps" not in cat_data:
+            continue
+        for app_id, app_data in cat_data["apps"].items():
+            v2fly_name = app_data.get("v2fly")
+            if not v2fly_name:
+                continue
+            key = f"{cat_id}.{app_id}"
+            state_key = f"v2fly_{v2fly_name}"
+            remote_domains = fetch_v2fly_domains(v2fly_name)
+            if remote_domains:
+                state[f"last_update_{state_key}"] = int(time.time())
+                state[f"count_{state_key}"] = len(remote_domains)
+                log(f"Fetched {len(remote_domains)} domains from v2fly/{v2fly_name} for {key}")
+            else:
+                log(f"No domains from v2fly/{v2fly_name}, using local fallback for {key}",
+                    syslog.LOG_WARNING)
+            # Merge: remote + local fallback
+            local_domains = set(app_data.get("domains", []))
+            merged[key] = remote_domains | local_domains
+    return merged
+
+
 def aggregate_cidrs(cidrs):
     networks = []
     for cidr in cidrs:
@@ -171,11 +249,18 @@ def get_all_domains_for_category(cat_data):
     return domains
 
 
-def generate_dnsmasq_conf(categories, table_prefix="approuter"):
+def generate_dnsmasq_conf(categories, table_prefix="approuter", v2fly_merged=None):
     """Generate Dnsmasq ipset config snippets per category and per app."""
+    v2fly_merged = v2fly_merged or {}
     for cat_id, cat_data in categories.items():
         # Category-level config (all apps combined)
         all_domains = get_all_domains_for_category(cat_data)
+        # Merge v2fly domains into category level
+        if "apps" in cat_data:
+            for app_id in cat_data["apps"]:
+                key = f"{cat_id}.{app_id}"
+                if key in v2fly_merged:
+                    all_domains.update(v2fly_merged[key])
         lines = []
         table_name = f"{table_prefix}_{cat_id}"
         for domain in sorted(all_domains):
@@ -189,7 +274,8 @@ def generate_dnsmasq_conf(categories, table_prefix="approuter"):
         # Per-app configs
         if "apps" in cat_data:
             for app_id, app_data in cat_data["apps"].items():
-                app_domains = app_data.get("domains", [])
+                key = f"{cat_id}.{app_id}"
+                app_domains = v2fly_merged.get(key, set(app_data.get("domains", [])))
                 app_table = f"{table_prefix}_{cat_id}_{app_id}"
                 app_lines = []
                 for domain in sorted(app_domains):
@@ -203,15 +289,21 @@ def generate_dnsmasq_conf(categories, table_prefix="approuter"):
     log(f"Generated Dnsmasq configs for {len(categories)} categories")
 
 
-def generate_unbound_conf(categories, table_prefix="approuter"):
+def generate_unbound_conf(categories, table_prefix="approuter", v2fly_merged=None):
     """Generate Unbound domain-to-table mapping files per category and per app."""
+    v2fly_merged = v2fly_merged or {}
     for cat_id, cat_data in categories.items():
         # Category-level
-        all_domains = sorted(get_all_domains_for_category(cat_data))
+        all_domains = get_all_domains_for_category(cat_data)
+        if "apps" in cat_data:
+            for app_id in cat_data["apps"]:
+                key = f"{cat_id}.{app_id}"
+                if key in v2fly_merged:
+                    all_domains.update(v2fly_merged[key])
         table_name = f"{table_prefix}_{cat_id}"
         mapping = {
             "table": table_name,
-            "domains": all_domains
+            "domains": sorted(all_domains)
         }
         filepath = os.path.join(UNBOUND_DIR, f"approuter_{cat_id}.json")
         write_if_changed(filepath, json.dumps(mapping, indent=2) + "\n")
@@ -219,11 +311,12 @@ def generate_unbound_conf(categories, table_prefix="approuter"):
         # Per-app
         if "apps" in cat_data:
             for app_id, app_data in cat_data["apps"].items():
-                app_domains = sorted(app_data.get("domains", []))
+                key = f"{cat_id}.{app_id}"
+                app_domains = v2fly_merged.get(key, set(app_data.get("domains", [])))
                 app_table = f"{table_prefix}_{cat_id}_{app_id}"
                 app_mapping = {
                     "table": app_table,
-                    "domains": app_domains
+                    "domains": sorted(app_domains)
                 }
                 app_filepath = os.path.join(UNBOUND_DIR, f"approuter_{cat_id}_{app_id}.json")
                 write_if_changed(app_filepath, json.dumps(app_mapping, indent=2) + "\n")
@@ -321,19 +414,22 @@ def main():
     if action == "update":
         log("Starting list update")
         updated = update_remote_lists(config, state)
+        # Fetch v2fly domains and merge into categories
+        v2fly_merged = update_v2fly_domains(categories, state)
         for cat_id, cat_data in categories.items():
-            # Write category-level domain file (all apps combined)
             all_domains = get_all_domains_for_category(cat_data)
-            write_domain_file(cat_id, all_domains)
-            # Write per-app domain files
             if "apps" in cat_data:
                 for app_id, app_data in cat_data["apps"].items():
-                    write_domain_file(f"{cat_id}.{app_id}", app_data.get("domains", []))
-        generate_dnsmasq_conf(categories)
-        generate_unbound_conf(categories)
+                    key = f"{cat_id}.{app_id}"
+                    app_domains = v2fly_merged.get(key, set(app_data.get("domains", [])))
+                    write_domain_file(key, app_domains)
+                    all_domains.update(app_domains)
+            write_domain_file(cat_id, all_domains)
+        generate_dnsmasq_conf(categories, v2fly_merged=v2fly_merged)
+        generate_unbound_conf(categories, v2fly_merged=v2fly_merged)
         state["last_full_update"] = int(time.time())
         save_state(state)
-        if updated:
+        if updated or v2fly_merged:
             update_tables()
         log("List update completed")
 
@@ -352,14 +448,18 @@ def main():
             if key.startswith("etag_"):
                 del state[key]
         update_remote_lists(config, state)
+        v2fly_merged = update_v2fly_domains(categories, state)
         for cat_id, cat_data in categories.items():
             all_domains = get_all_domains_for_category(cat_data)
-            write_domain_file(cat_id, all_domains)
             if "apps" in cat_data:
                 for app_id, app_data in cat_data["apps"].items():
-                    write_domain_file(f"{cat_id}.{app_id}", app_data.get("domains", []))
-        generate_dnsmasq_conf(categories)
-        generate_unbound_conf(categories)
+                    key = f"{cat_id}.{app_id}"
+                    app_domains = v2fly_merged.get(key, set(app_data.get("domains", [])))
+                    write_domain_file(key, app_domains)
+                    all_domains.update(app_domains)
+            write_domain_file(cat_id, all_domains)
+        generate_dnsmasq_conf(categories, v2fly_merged=v2fly_merged)
+        generate_unbound_conf(categories, v2fly_merged=v2fly_merged)
         state["last_full_update"] = int(time.time())
         save_state(state)
         update_tables()

@@ -150,18 +150,16 @@ function approuter_services()
     $mdl = new Approuter();
 
     if ((string)$mdl->general->enabled === '1') {
-        if ((string)$mdl->general->dnsResolver === 'unbound') {
-            $services[] = [
-                'description' => gettext('AppRouter DNS Watcher'),
-                'configd' => [
-                    'restart' => ['approuter dns_watcher_start'],
-                    'start' => ['approuter dns_watcher_start'],
-                    'stop' => ['approuter dns_watcher_stop'],
-                ],
-                'name' => 'approuter_dns_watcher',
-                'pidfile' => '/var/run/approuter_dns_watcher.pid',
-            ];
-        }
+        $services[] = [
+            'description' => gettext('AppRouter DNS Watcher'),
+            'configd' => [
+                'restart' => ['approuter dns_watcher_start'],
+                'start' => ['approuter dns_watcher_start'],
+                'stop' => ['approuter dns_watcher_stop'],
+            ],
+            'name' => 'approuter_dns_watcher',
+            'pidfile' => '/var/run/approuter_dns_watcher.pid',
+        ];
     }
 
     return $services;
