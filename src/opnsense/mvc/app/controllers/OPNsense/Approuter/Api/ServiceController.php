@@ -48,12 +48,6 @@ class ServiceController extends ApiMutableServiceControllerBase
             $backend->configdRun('template reload OPNsense/Approuter');
             $backend->configdRun('approuter generate_dns');
 
-            // Reload Unbound if in unbound mode (picks up log-replies config)
-            $mdl = new Approuter();
-            if ((string)$mdl->general->dnsResolver === 'unbound') {
-                $backend->configdRun('dns reload');
-            }
-
             $backend->configdRun('filter reload');
 
             // Explicitly load client tables from files (OPNsense registerTable
