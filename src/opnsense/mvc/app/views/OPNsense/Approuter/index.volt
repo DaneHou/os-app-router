@@ -73,11 +73,11 @@
 
         $("#grid-rules").UIBootgrid({
             'search':'/api/approuter/settings/searchRule',
-            'get':'/api/approuter/settings/getRule',
-            'set':'/api/approuter/settings/setRule',
+            'get':'/api/approuter/settings/getRule/',
+            'set':'/api/approuter/settings/setRule/',
             'add':'/api/approuter/settings/addRule',
-            'del':'/api/approuter/settings/delRule',
-            'toggle':'/api/approuter/settings/toggleRule'
+            'del':'/api/approuter/settings/delRule/',
+            'toggle':'/api/approuter/settings/toggleRule/'
         });
 
         $("#reconfigureAct").click(function(){
