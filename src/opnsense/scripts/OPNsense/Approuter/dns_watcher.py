@@ -428,9 +428,18 @@ def main():
                 pid = int(f.read().strip())
             try:
                 os.kill(pid, signal.SIGTERM)
+                # Wait for process to exit (up to 5s) to avoid race with restart
+                for _ in range(50):
+                    try:
+                        os.kill(pid, 0)
+                        time.sleep(0.1)
+                    except ProcessLookupError:
+                        break
                 print(f"Stopped DNS watcher (PID {pid})")
             except ProcessLookupError:
                 print("DNS watcher not running")
+            # Always clean up PID file
+            if os.path.exists(pid_file):
                 os.unlink(pid_file)
         else:
             print("DNS watcher not running")
