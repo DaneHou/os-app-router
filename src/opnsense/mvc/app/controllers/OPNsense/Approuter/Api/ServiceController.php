@@ -48,10 +48,18 @@ class ServiceController extends ApiMutableServiceControllerBase
             $backend->configdRun('template reload OPNsense/Approuter');
             $backend->configdRun('approuter generate_dns');
 
-            $backend->configdRun('filter reload');
+            // Restart dns_watcher early (before filter reload which can be slow
+            // and cause PHP timeout). dns_watcher loads mappings at startup.
+            $backend->configdRun('approuter dns_watcher_stop');
+            $backend->configdRun('approuter dns_watcher_start');
+
+            // filter reload can be slow — run async to avoid PHP timeout
+            $backend->configdpRun('filter reload');
 
             // Explicitly load client tables from files (OPNsense registerTable
-            // creates persist tables but doesn't always load file contents)
+            // creates persist tables but doesn't always load file contents).
+            // Small delay to let async filter reload register the tables.
+            sleep(2);
             $clientsDir = '/usr/local/etc/app-router/clients';
             if (is_dir($clientsDir)) {
                 foreach (glob($clientsDir . '/*.txt') as $clientFile) {
@@ -59,12 +67,6 @@ class ServiceController extends ApiMutableServiceControllerBase
                     exec("/sbin/pfctl -t " . escapeshellarg($tableName) . " -T replace -f " . escapeshellarg($clientFile));
                 }
             }
-
-            // Restart dns_watcher: stop first to clear stale PID, then start fresh.
-            // After start, signal SIGHUP to reload domain mappings immediately.
-            $backend->configdRun('approuter dns_watcher_stop');
-            $backend->configdRun('approuter dns_watcher_start');
-            $backend->configdRun('approuter dns_watcher_reload');
 
             // Trigger list update in background (non-blocking) if lists don't exist yet
             if (!file_exists('/usr/local/etc/app-router/cidrs/china_all.txt')) {
