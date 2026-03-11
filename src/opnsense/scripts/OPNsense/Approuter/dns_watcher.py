@@ -2,10 +2,11 @@
 """
 AppRouter DNS Watcher
 Periodically resolves configured domains and updates pf tables with
-their IP addresses. Works with any DNS resolver (Unbound, Dnsmasq, etc.)
-without requiring special logging configuration.
+their IP addresses. Also adds /24 subnets for CDN coverage.
+Works with any DNS resolver without special logging configuration.
 """
 
+import ipaddress
 import json
 import os
 import socket
@@ -18,15 +19,26 @@ from pathlib import Path
 
 CONFIG_DIR = "/usr/local/etc/app-router/unbound.d"
 PID_FILE = "/var/run/approuter_dns_watcher.pid"
+LOG_FILE = "/var/log/approuter_dns_watcher.log"
 RESOLVE_INTERVAL = 30  # seconds between full resolution cycles
 
 domain_table_map = {}
 
 
 def log(msg, level=syslog.LOG_INFO):
-    syslog.openlog("approuter-dns", syslog.LOG_PID, syslog.LOG_DAEMON)
-    syslog.syslog(level, msg)
-    syslog.closelog()
+    try:
+        syslog.openlog("approuter-dns", syslog.LOG_PID, syslog.LOG_DAEMON)
+        syslog.syslog(level, msg)
+        syslog.closelog()
+    except Exception:
+        pass
+    # Also log to file (syslog may not work after daemonize on FreeBSD)
+    try:
+        with open(LOG_FILE, "a") as f:
+            t = time.strftime("%Y-%m-%d %H:%M:%S")
+            f.write(f"{t} {msg}\n")
+    except Exception:
+        pass
 
 
 def load_domain_mappings():
@@ -34,9 +46,10 @@ def load_domain_mappings():
     domain_table_map.clear()
 
     if not os.path.isdir(CONFIG_DIR):
+        log(f"Config dir {CONFIG_DIR} not found")
         return
 
-    for config_file in Path(CONFIG_DIR).glob("approuter_*.json"):
+    for config_file in sorted(Path(CONFIG_DIR).glob("approuter_*.json")):
         try:
             with open(config_file) as f:
                 data = json.load(f)
@@ -46,12 +59,13 @@ def load_domain_mappings():
         except (json.JSONDecodeError, IOError) as e:
             log(f"Error loading {config_file}: {e}", syslog.LOG_ERR)
 
-    log(f"Loaded {len(domain_table_map)} domain mappings")
+    log(f"Loaded {len(domain_table_map)} domain mappings from {CONFIG_DIR}")
 
 
 def resolve_and_update():
-    """Resolve all configured domains and add IPs to pf tables."""
+    """Resolve all configured domains and add IPs + /24 subnets to pf tables."""
     if not domain_table_map:
+        log("No domain mappings loaded, skipping resolution")
         return 0
 
     # Group domains by table
@@ -62,6 +76,7 @@ def resolve_and_update():
     total_added = 0
     for table, domains in table_domains.items():
         ips = set()
+        subnets = set()
         for domain in domains:
             try:
                 results = socket.getaddrinfo(
@@ -69,16 +84,21 @@ def resolve_and_update():
                     socket.SOCK_STREAM
                 )
                 for family, _, _, _, sockaddr in results:
-                    ips.add(sockaddr[0])
+                    ip = sockaddr[0]
+                    ips.add(ip)
+                    # Add /24 subnet for CDN coverage
+                    net = ipaddress.ip_network(f"{ip}/24", strict=False)
+                    subnets.add(str(net))
             except (socket.gaierror, OSError):
                 pass
-        if ips:
+
+        addrs = list(ips) + list(subnets)
+        if addrs:
             try:
                 result = subprocess.run(
-                    ["/sbin/pfctl", "-t", table, "-T", "add"] + list(ips),
+                    ["/sbin/pfctl", "-t", table, "-T", "add"] + addrs,
                     capture_output=True, text=True, timeout=10
                 )
-                # Parse "X/Y addresses added" from pfctl output
                 output = result.stderr.strip()
                 if "added" in output:
                     parts = output.split("/")
@@ -86,7 +106,7 @@ def resolve_and_update():
                         added = int(parts[0].strip())
                         if added > 0:
                             total_added += added
-                            log(f"Added {added} new IPs to {table}")
+                            log(f"Added {added} new entries to {table}")
             except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as e:
                 log(f"Failed to add IPs to {table}: {e}", syslog.LOG_ERR)
 
@@ -113,11 +133,13 @@ def run_daemon():
 
     # Initial full resolution
     added = resolve_and_update()
-    log(f"Initial resolution: {added} new IPs added")
+    log(f"Initial resolution: {added} new entries added")
 
     while True:
         time.sleep(RESOLVE_INTERVAL)
         try:
+            # Reload mappings periodically (picks up config changes)
+            load_domain_mappings()
             resolve_and_update()
         except Exception as e:
             log(f"Resolution cycle error: {e}", syslog.LOG_ERR)
@@ -133,7 +155,6 @@ def daemonize():
     if pid > 0:
         os._exit(0)
     # Redirect fds without closing Python file objects first
-    # (closing sys.stdout/stderr can crash Python internals)
     devnull = os.open(os.devnull, os.O_RDWR)
     os.dup2(devnull, 0)
     os.dup2(devnull, 1)
@@ -166,7 +187,7 @@ def main():
             signal.signal(signal.SIGINT, cleanup)
             write_pid()
             load_domain_mappings()
-            log("DNS watcher started")
+            log(f"DNS watcher started (PID {os.getpid()})")
             run_daemon()
         except Exception as e:
             log(f"DNS watcher crashed: {e}", syslog.LOG_ERR)
