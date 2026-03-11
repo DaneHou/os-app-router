@@ -85,6 +85,7 @@
             ajaxCall(url="/api/approuter/service/reconfigure", sendData={}, callback=function(data,status) {
                 $("#reconfigureAct_progress").removeClass("fa fa-spinner fa-pulse");
                 $("#RuleChangeMessage").addClass("hidden");
+                updateServiceControlUI('approuter');
             });
         });
 
