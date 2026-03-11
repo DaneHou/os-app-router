@@ -56,24 +56,34 @@ class SettingsController extends ApiMutableModelControllerBase
 
         if (isset($result['rule'])) {
             // Augment gateway: TextField → dropdown options
-            // Uses getGatewaysAction() which fetches via configd (includes dynamic gateways like FRP_GW)
+            // Uses configctl with timeout to prevent hanging (configd socket can block)
             try {
                 $gwValue = is_string($result['rule']['gateway']) ? $result['rule']['gateway'] : '';
                 $gwOptions = ['' => ['value' => '(none)', 'selected' => empty($gwValue) ? 1 : 0]];
-                $gatewayData = $this->getGatewaysAction();
-                foreach ($gatewayData['rows'] as $gw) {
-                    $name = $gw['name'];
-                    $label = $name;
-                    if (!empty($gw['descr'])) {
-                        $label .= ' (' . $gw['descr'] . ')';
+                $gwLines = [];
+                exec('timeout 3 configctl interface gateways status 2>/dev/null', $gwLines);
+                $gateways = json_decode(implode('', $gwLines), true);
+                if (is_array($gateways)) {
+                    foreach ($gateways as $gwData) {
+                        if (!is_array($gwData)) {
+                            continue;
+                        }
+                        $name = $gwData['name'] ?? '';
+                        if (empty($name)) {
+                            continue;
+                        }
+                        $label = $name;
+                        if (!empty($gwData['status_translated'])) {
+                            $label .= ' (' . $gwData['status_translated'] . ')';
+                        }
+                        if (!empty($gwData['address'])) {
+                            $label .= ' [' . $gwData['address'] . ']';
+                        }
+                        $gwOptions[$name] = [
+                            'value' => $label,
+                            'selected' => ($name === $gwValue) ? 1 : 0,
+                        ];
                     }
-                    if (!empty($gw['gateway'])) {
-                        $label .= ' [' . $gw['gateway'] . ']';
-                    }
-                    $gwOptions[$name] = [
-                        'value' => $label,
-                        'selected' => ($name === $gwValue) ? 1 : 0,
-                    ];
                 }
                 if (!empty($gwValue) && !isset($gwOptions[$gwValue])) {
                     $gwOptions[$gwValue] = [
@@ -188,29 +198,7 @@ class SettingsController extends ApiMutableModelControllerBase
             // ignore
         }
 
-        // Fallback: Routing model (if configd didn't return results)
-        if (empty($result['rows'])) {
-            try {
-                $gwModel = new \OPNsense\Routing\Gateways();
-                foreach ($gwModel->gateway_item->iterateItems() as $uuid => $gw) {
-                    if ((string)$gw->disabled === '1') {
-                        continue;
-                    }
-                    $name = (string)$gw->name;
-                    if (!empty($name) && !isset($seen[$name])) {
-                        $seen[$name] = true;
-                        $result['rows'][] = [
-                            'name' => $name,
-                            'interface' => (string)$gw->interface,
-                            'gateway' => (string)$gw->gateway,
-                            'descr' => (string)$gw->descr,
-                        ];
-                    }
-                }
-            } catch (\Throwable $e) {
-                // ignore
-            }
-        }
+        // Note: no Routing model fallback — its constructor can hang via configd
 
         return $result;
     }
