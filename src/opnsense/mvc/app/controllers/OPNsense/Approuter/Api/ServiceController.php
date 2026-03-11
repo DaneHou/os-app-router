@@ -63,6 +63,9 @@ class ServiceController extends ApiMutableServiceControllerBase
             // Always start dns_watcher (warmup_tables works in both DNS modes)
             $backend->configdRun('approuter dns_watcher_start');
 
+            // Signal dns_watcher to reload domain mappings immediately
+            $backend->configdRun('approuter dns_watcher_reload');
+
             // Trigger list update in background (non-blocking) if lists don't exist yet
             if (!file_exists('/usr/local/etc/app-router/cidrs/china_all.txt')) {
                 $backend->configdpRun('approuter update_lists');

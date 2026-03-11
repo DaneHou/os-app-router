@@ -367,6 +367,13 @@ def active_resolve_loop():
             log(f"Active resolution error: {e}", syslog.LOG_ERR)
 
 
+def reload_mappings(signum=None, frame=None):
+    """SIGHUP handler: reload domain mappings immediately."""
+    log("Received SIGHUP, reloading domain mappings")
+    load_domain_mappings()
+    resolve_and_update()
+
+
 def cleanup(signum=None, frame=None):
     log("DNS watcher stopped")
     sys.exit(0)
@@ -379,6 +386,7 @@ def main():
         syslog.openlog("approuter-dns", syslog.LOG_PID, syslog.LOG_DAEMON)
         signal.signal(signal.SIGTERM, cleanup)
         signal.signal(signal.SIGINT, cleanup)
+        signal.signal(signal.SIGHUP, reload_mappings)
 
         detect_unbound_port()
         load_domain_mappings()
