@@ -236,6 +236,7 @@ class ServiceController extends ApiMutableServiceControllerBase
 
         // Recent log entries: syslog + dns_watcher log
         $logs = [];
+        $syslogLines = [];
         exec("grep -i 'approuter' /var/log/system/latest.log 2>/dev/null | tail -20", $syslogLines);
         foreach ($syslogLines as $line) {
             $logs[] = $line;
