@@ -232,7 +232,7 @@ def process_sniffed_dns(query_domain, answer_ips):
 
 # Regex to extract query domain and A record IPs from tcpdump -vv output
 # Example: "q: A? www.iqiyi.com. 5/0/0 ... A 23.45.123.58, ... A 23.45.123.56 (166)"
-QUERY_RE = re.compile(r'q:\s+A\?\s+(\S+?)\.')
+QUERY_RE = re.compile(r'q:\s+A\?\s+(\S+)\.')
 ANSWER_RE = re.compile(r'\sA\s+(\d+\.\d+\.\d+\.\d+)')
 
 
