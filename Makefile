@@ -11,7 +11,7 @@ PLUGIN_SERVICE=	$(DESTDIR)$(PREFIX)/opnsense/service
 PLUGIN_CONF=	$(DESTDIR)$(PREFIX)/etc/app-router
 PLUGIN_HOOK=	$(DESTDIR)$(PREFIX)/etc/inc/plugins.inc.d
 
-.PHONY: install install-plugin activate uninstall clean lint
+.PHONY: install install-plugin activate uninstall uninstall-all clean lint
 
 install: install-plugin activate
 	@echo ""
@@ -71,6 +71,8 @@ install-plugin:
 		$(PLUGIN_SERVICE)/templates/OPNsense/Approuter/+TARGETS
 	@cp src/opnsense/service/templates/OPNsense/Approuter/approuter.conf \
 		$(PLUGIN_SERVICE)/templates/OPNsense/Approuter/approuter.conf
+	@cp src/opnsense/service/templates/OPNsense/Approuter/approuter_unbound.conf \
+		$(PLUGIN_SERVICE)/templates/OPNsense/Approuter/approuter_unbound.conf
 	@# Data directories
 	@mkdir -p $(PLUGIN_CONF)/domains
 	@mkdir -p $(PLUGIN_CONF)/cidrs
@@ -136,6 +138,32 @@ uninstall:
 	@# Reload firewall to remove injected rules
 	@configctl filter reload 2>/dev/null || true
 	@echo ">>> $(PLUGIN_NAME) uninstalled."
+
+uninstall-all: uninstall
+	@echo ">>> Removing ALL data (config, caches, generated files)..."
+	@# Remove entire config directory including config.json and clients
+	@rm -rf $(PLUGIN_CONF)
+	@# Remove generated Unbound config
+	@rm -f $(DESTDIR)$(PREFIX)/etc/unbound.opnsense.d/approuter.conf
+	@# Remove generated Dnsmasq configs (in case user had dnsmasq mode)
+	@rm -f $(DESTDIR)$(PREFIX)/etc/dnsmasq.opnsense.d/approuter_*.conf
+	@# Remove generated template output
+	@rm -f $(DESTDIR)$(PREFIX)/etc/app-router/config.json
+	@# Flush all OPNsense caches
+	@rm -f /tmp/opnsense_menu_cache.xml 2>/dev/null || true
+	@rm -f /tmp/*.cache 2>/dev/null || true
+	@rm -rf /tmp/opnsense_volt_templates 2>/dev/null || true
+	@rm -rf /var/cache/opnsense 2>/dev/null || true
+	@# Remove Approuter config from config.xml (OPNsense model data)
+	@if command -v configctl >/dev/null 2>&1; then \
+		echo ">>> Note: AppRouter settings in config.xml must be removed manually via:"; \
+		echo ">>>   Edit /conf/config.xml and remove the <Approuter> section under <OPNsense>"; \
+	fi
+	@# Restart services to clear all state
+	@service configd restart 2>/dev/null || true
+	@service php-fpm restart 2>/dev/null || true
+	@configctl filter reload 2>/dev/null || true
+	@echo ">>> $(PLUGIN_NAME) fully removed (clean slate)."
 
 clean:
 	@find . -name '__pycache__' -exec rm -rf {} + 2>/dev/null || true
