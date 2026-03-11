@@ -1,2 +1,2 @@
 approuter.conf:/usr/local/etc/app-router/config.json
-approuter_unbound.conf:/usr/local/etc/unbound.opnsense.d/approuter.conf
+approuter_unbound.conf:/var/unbound/etc/approuter.conf

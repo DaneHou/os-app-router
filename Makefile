@@ -150,8 +150,9 @@ uninstall-all: uninstall
 	@echo ">>> Removing ALL data (config, caches, generated files)..."
 	@# Remove entire config directory including config.json and clients
 	@rm -rf $(PLUGIN_CONF)
-	@# Remove generated Unbound config
+	@# Remove generated Unbound config (both possible locations)
 	@rm -f $(DESTDIR)$(PREFIX)/etc/unbound.opnsense.d/approuter.conf
+	@rm -f /var/unbound/etc/approuter.conf
 	@# Remove generated Dnsmasq configs (in case user had dnsmasq mode)
 	@rm -f $(DESTDIR)$(PREFIX)/etc/dnsmasq.opnsense.d/approuter_*.conf
 	@# Remove generated template output
