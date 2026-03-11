@@ -370,11 +370,13 @@ def update_remote_lists(config, state):
 
     for source_id, source in sources.items():
         url = source["url"]
+        fallback_url = DEFAULT_SOURCES.get(source_id, {}).get("url")
         etag = state.get(f"etag_{source_id}", "")
         try:
             content, new_etag, changed = fetch_url(url, etag)
             state[f"etag_{source_id}"] = new_etag
             state[f"last_update_{source_id}"] = int(time.time())
+            state.pop(f"last_error_{source_id}", None)
 
             if changed and content:
                 if source["type"] == "dnsmasq":
@@ -391,6 +393,23 @@ def update_remote_lists(config, state):
         except Exception as e:
             log(f"Error fetching {source_id}: {e}", syslog.LOG_ERR)
             state[f"last_error_{source_id}"] = str(e)
+            # Fallback to default URL if configured URL fails
+            if fallback_url and fallback_url != url:
+                log(f"Trying fallback URL for {source_id}", syslog.LOG_WARNING)
+                try:
+                    content, new_etag, changed = fetch_url(fallback_url)
+                    if content:
+                        if source["type"] == "dnsmasq":
+                            domains = parse_dnsmasq_domains(content)
+                            china_domains.update(domains)
+                            log(f"Fallback OK: {len(domains)} domains from {source_id}")
+                        elif source["type"] == "cidr":
+                            cidrs = parse_cidr_list(content)
+                            china_cidrs.update(cidrs)
+                            log(f"Fallback OK: {len(cidrs)} CIDRs from {source_id}")
+                        updated = True
+                except Exception as e2:
+                    log(f"Fallback also failed for {source_id}: {e2}", syslog.LOG_ERR)
 
     for idx, custom in enumerate(custom_sources):
         url = custom.get("url", "")
