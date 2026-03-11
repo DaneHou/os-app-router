@@ -1,13 +1,10 @@
 #!/usr/local/bin/python3
 """
-AppRouter DNS Watcher — Dual mode: Unbound log parsing + active resolution.
+AppRouter DNS Watcher — Resolves domains via Unbound and updates pf tables.
 
-Primary: Tail Unbound's reply log to capture the actual IPs returned to clients.
-This is critical for CDN domains where the resolver returns different IPs based
-on client location.
-
-Fallback: Periodically resolve configured domains from the firewall itself
-to pre-populate pf tables (covers the gap before any client DNS query).
+Queries the local Unbound resolver (same path as clients) to get the actual
+CDN IPs that clients will receive. Adds IPs + /24 subnets to pf tables and
+kills stale pf states so existing connections get re-routed.
 
 Designed to run as a foreground process under FreeBSD daemon(8).
 """
@@ -16,37 +13,25 @@ import ipaddress
 import json
 import os
 import re
-import select
 import socket
 import subprocess
 import sys
 import time
 import signal
 import syslog
-import threading
 from pathlib import Path
 
 CONFIG_DIR = "/usr/local/etc/app-router/unbound.d"
+CONFIG_FILE = "/usr/local/etc/app-router/config.json"
 CLIENTS_DIR = Path("/usr/local/etc/app-router/clients")
 LOG_FILE = "/var/log/approuter_dns_watcher.log"
-UNBOUND_LOG = "/var/log/resolver/latest.log"
-RESOLVE_INTERVAL = 300  # active resolution every 5 min (backup only)
+RESOLVE_INTERVAL = 30  # seconds between full resolution cycles
+
+# Unbound listener — read from unbound.conf at startup
+UNBOUND_ADDR = "127.0.0.1"
+UNBOUND_PORT = 53530  # OPNsense default
 
 domain_table_map = {}
-
-# Unbound reply log format (RFC5424 syslog on OPNsense):
-# <30>1 2026-03-10T21:52:54-06:00 OPNsense unbound 13671 - [...] [pid:0] info: 192.168.1.1 www.iqiyi.com. A IN NOERROR 0.001 0 23.67.33.35
-REPLY_RE = re.compile(
-    r'info:\s+'
-    r'[\d.]+\s+'              # client IP
-    r'(\S+)\s+'               # domain (with trailing dot)
-    r'(A|AAAA)\s+'            # query type
-    r'IN\s+'                  # class
-    r'NOERROR\s+'             # rcode
-    r'[\d.]+\s+'              # response time
-    r'[01]\s+'                # cached flag
-    r'([\d.]+|[\da-f:]+)'    # answer IP
-)
 
 
 def log(msg, level=syslog.LOG_INFO):
@@ -60,6 +45,67 @@ def log(msg, level=syslog.LOG_INFO):
             f.write(f"{t} {msg}\n")
     except Exception:
         pass
+
+
+def detect_unbound_port():
+    """Read Unbound's listening port from its config."""
+    global UNBOUND_PORT
+    try:
+        with open("/var/unbound/unbound.conf") as f:
+            for line in f:
+                line = line.strip()
+                if line.startswith("port:"):
+                    port = int(line.split(":")[1].strip())
+                    if port > 0:
+                        UNBOUND_PORT = port
+                        return
+    except (IOError, ValueError):
+        pass
+
+
+def resolve_via_unbound(domain):
+    """Resolve a domain using drill via the local Unbound instance.
+    Returns a set of IPv4 addresses."""
+    ips = set()
+    try:
+        result = subprocess.run(
+            ["/usr/bin/drill", f"@{UNBOUND_ADDR}", "-p", str(UNBOUND_PORT),
+             domain, "A"],
+            capture_output=True, text=True, timeout=10
+        )
+        # Parse drill output: look for A records in ANSWER SECTION
+        in_answer = False
+        for line in result.stdout.splitlines():
+            if line.startswith(";; ANSWER SECTION:"):
+                in_answer = True
+                continue
+            if in_answer:
+                if line.startswith(";;") or not line.strip():
+                    break
+                # Format: domain. TTL IN A 1.2.3.4
+                parts = line.split()
+                if len(parts) >= 5 and parts[3] == "A":
+                    ip = parts[4]
+                    try:
+                        ipaddress.ip_address(ip)
+                        ips.add(ip)
+                    except ValueError:
+                        pass
+    except (subprocess.TimeoutExpired, OSError):
+        pass
+
+    # Fallback to system resolver if drill fails
+    if not ips:
+        try:
+            results = socket.getaddrinfo(
+                domain, None, socket.AF_INET, socket.SOCK_STREAM
+            )
+            for family, _, _, _, sockaddr in results:
+                ips.add(sockaddr[0])
+        except (socket.gaierror, OSError):
+            pass
+
+    return ips
 
 
 def load_domain_mappings():
@@ -130,89 +176,13 @@ def kill_stale_states(new_ips, client_ips):
     log(f"Killed stale states for {len(new_ips)} new IPs x {len(client_ips)} clients")
 
 
-def process_dns_reply(domain, ip):
-    """Process a single DNS reply: add IP + /24 subnet to the matching pf table."""
-    domain = domain.lower().rstrip('.')
-    # Check exact match first, then try parent domains (for CDN CNAMEs)
-    table = domain_table_map.get(domain)
-    if not table:
-        # Try matching parent: e.g. e99042.a.akamaiedge.net won't match,
-        # but the original query domain should have matched already.
-        return None
-
-    try:
-        addr = ipaddress.ip_address(ip)
-    except ValueError:
-        return None
-
-    addrs = {ip}
-    if addr.version == 4:
-        subnet = str(ipaddress.ip_network(f"{ip}/24", strict=False))
-        addrs.add(subnet)
-
-    added = add_to_table(table, addrs)
-    if added > 0:
-        log(f"[log] Added {added} entries to {table} for {domain} -> {ip}")
-        # Kill stale states for the new IPs
-        client_ips = get_client_ips()
-        if client_ips:
-            kill_stale_states(addrs, client_ips)
-    return added
-
-
-def tail_unbound_log():
-    """Tail Unbound log file and process DNS replies in real time."""
-    log(f"Starting Unbound log watcher on {UNBOUND_LOG}")
-
-    while True:
-        proc = None
-        try:
-            # Resolve symlink to get actual file path
-            real_path = os.path.realpath(UNBOUND_LOG)
-            if not os.path.exists(real_path):
-                log(f"Unbound log not found: {real_path}", syslog.LOG_WARNING)
-                time.sleep(10)
-                continue
-
-            proc = subprocess.Popen(
-                ["/usr/bin/tail", "-F", UNBOUND_LOG],
-                stdout=subprocess.PIPE,
-                stderr=subprocess.DEVNULL,
-                text=True,
-                bufsize=1
-            )
-            log(f"Unbound log tail started on {real_path}")
-
-            for line in proc.stdout:
-                if "info:" not in line:
-                    continue
-                m = REPLY_RE.search(line)
-                if not m:
-                    continue
-                domain = m.group(1).lower().rstrip('.')
-                qtype = m.group(2)
-                answer_ip = m.group(3)
-
-                if qtype == 'A' and domain in domain_table_map:
-                    process_dns_reply(domain, answer_ip)
-
-        except Exception as e:
-            log(f"Log tail error: {e}", syslog.LOG_ERR)
-
-        if proc:
-            try:
-                proc.kill()
-            except Exception:
-                pass
-        log("Unbound log tail exited, restarting in 5s...")
-        time.sleep(5)
-
-
 def resolve_and_update():
-    """Active resolution: resolve all domains from firewall itself (backup mode)."""
+    """Resolve all configured domains via Unbound and add IPs + /24 subnets to pf tables."""
     if not domain_table_map:
+        log("No domain mappings loaded, skipping resolution")
         return 0
 
+    # Group domains by table
     table_domains = {}
     for domain, table in domain_table_map.items():
         table_domains.setdefault(table, []).append(domain)
@@ -222,23 +192,19 @@ def resolve_and_update():
     for table, domains in table_domains.items():
         addrs = set()
         for domain in domains:
-            try:
-                results = socket.getaddrinfo(
-                    domain, None, socket.AF_INET, socket.SOCK_STREAM
-                )
-                for family, _, _, _, sockaddr in results:
-                    ip = sockaddr[0]
-                    addrs.add(ip)
-                    addrs.add(str(ipaddress.ip_network(f"{ip}/24", strict=False)))
-            except (socket.gaierror, OSError):
-                pass
+            ips = resolve_via_unbound(domain)
+            for ip in ips:
+                addrs.add(ip)
+                # Add /24 subnet for CDN coverage
+                addrs.add(str(ipaddress.ip_network(f"{ip}/24", strict=False)))
 
         added = add_to_table(table, addrs)
         if added > 0:
             total_added += added
             all_new_ips.update(addrs)
-            log(f"[resolve] Added {added} new entries to {table}")
+            log(f"Added {added} new entries to {table}")
 
+    # Kill stale states so existing connections get re-routed
     if all_new_ips:
         client_ips = get_client_ips()
         if client_ips:
@@ -247,20 +213,27 @@ def resolve_and_update():
     return total_added
 
 
-def active_resolve_loop():
-    """Background thread: periodic active resolution as fallback."""
-    while True:
-        time.sleep(RESOLVE_INTERVAL)
-        try:
-            load_domain_mappings()
-            resolve_and_update()
-        except Exception as e:
-            log(f"Active resolution error: {e}", syslog.LOG_ERR)
-
-
 def cleanup(signum=None, frame=None):
     log("DNS watcher stopped")
     sys.exit(0)
+
+
+def run_daemon():
+    """Main daemon loop: resolve domains periodically."""
+    log(f"Resolving via Unbound ({UNBOUND_ADDR}:{UNBOUND_PORT}) every {RESOLVE_INTERVAL}s")
+
+    # Initial full resolution
+    added = resolve_and_update()
+    log(f"Initial resolution: {added} new entries added")
+
+    while True:
+        time.sleep(RESOLVE_INTERVAL)
+        try:
+            # Reload mappings periodically (picks up config changes)
+            load_domain_mappings()
+            resolve_and_update()
+        except Exception as e:
+            log(f"Resolution cycle error: {e}", syslog.LOG_ERR)
 
 
 def main():
@@ -271,20 +244,12 @@ def main():
         signal.signal(signal.SIGTERM, cleanup)
         signal.signal(signal.SIGINT, cleanup)
 
+        detect_unbound_port()
         load_domain_mappings()
         log(f"DNS watcher started (PID {os.getpid()})")
 
-        # Initial active resolution to pre-populate tables
-        added = resolve_and_update()
-        log(f"Initial resolution: {added} new entries added")
-
-        # Start active resolution in background thread (fallback, every 5 min)
-        resolver_thread = threading.Thread(target=active_resolve_loop, daemon=True)
-        resolver_thread.start()
-
-        # Main thread: tail Unbound log for real-time client DNS replies
         try:
-            tail_unbound_log()
+            run_daemon()
         except Exception as e:
             log(f"DNS watcher crashed: {e}", syslog.LOG_ERR)
             sys.exit(1)
