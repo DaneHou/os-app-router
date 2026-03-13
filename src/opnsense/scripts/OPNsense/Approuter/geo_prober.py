@@ -336,7 +336,11 @@ def probe_rule_loop(rule):
     log(f"[probe] Starting probe loop for '{desc}': "
         f"gateways={gateways}, interval={probe_interval}s, method={probe_method}")
 
+    # Track which gateway is currently active for switch logging
+    current_active_gw = gateways[-1]  # starts with fallback
+
     while not shutdown_event.is_set():
+        probe_summary = []
         for i in range(num_probed):
             if shutdown_event.is_set():
                 return
@@ -356,6 +360,14 @@ def probe_rule_loop(rule):
                 state["consecutive_ok"] = 0
                 state["latency"] = 0.0
 
+            # Log each probe result
+            status_str = "OK" if available else "FAIL"
+            latency_str = f" {latency:.0f}ms" if latency > 0 else ""
+            probe_summary.append(
+                f"{gw_name}={status_str}{latency_str}"
+                f"(ok:{state['consecutive_ok']}/fail:{state['consecutive_fail']})"
+            )
+
             # Store probe result for status reporting
             with probe_results_lock:
                 key = f"{desc}:{gw_name}"
@@ -369,9 +381,13 @@ def probe_rule_loop(rule):
                     "timestamp": time.time(),
                 }
 
+        # Log probe round summary
+        log(f"[probe] '{desc}': {', '.join(probe_summary)}")
+
         # Determine which gateways should be active after debounce
         now = time.time()
         changed = False
+        prev_active_gw = current_active_gw
 
         if probe_method == "latency":
             # Latency mode: pick the best available gateway
@@ -392,8 +408,9 @@ def probe_rule_loop(rule):
                         state["last_switch_time"] = now
                         changed = True
                         action = "ENABLE" if should_be_active else "DISABLE"
-                        log(f"[probe] {action} {gateways[i]} for '{desc}' "
-                            f"(latency: {state['latency']:.0f}ms)")
+                        log(f"[switch] {action} {gateways[i]} for '{desc}' "
+                            f"(latency: {state['latency']:.0f}ms, "
+                            f"best: {gateways[best_gw] if best_gw >= 0 else 'none'} {best_latency:.0f}ms)")
         else:
             # Standard mode: enable all gateways that pass probes
             for i in range(num_probed):
@@ -403,15 +420,30 @@ def probe_rule_loop(rule):
                         state["available"] = True
                         state["last_switch_time"] = now
                         changed = True
-                        log(f"[probe] ENABLE {gateways[i]} for '{desc}'")
+                        log(f"[switch] ENABLE {gateways[i]} for '{desc}' "
+                            f"(passed {DEBOUNCE_COUNT} consecutive probes)")
                 elif state["available"] and state["consecutive_fail"] >= DEBOUNCE_COUNT:
                     if now - state["last_switch_time"] >= SWITCH_COOLDOWN:
                         state["available"] = False
                         state["last_switch_time"] = now
                         changed = True
-                        log(f"[probe] DISABLE {gateways[i]} for '{desc}'")
+                        log(f"[switch] DISABLE {gateways[i]} for '{desc}' "
+                            f"(failed {DEBOUNCE_COUNT} consecutive probes)")
 
         if changed:
+            # Determine new active gateway (highest priority enabled, or fallback)
+            new_active_gw = gateways[-1]  # fallback
+            for i in range(num_probed):
+                if gw_states[i]["available"]:
+                    new_active_gw = gateways[i]
+                    break
+
+            # Log the actual traffic switch
+            if new_active_gw != prev_active_gw:
+                log(f"[switch] '{desc}': traffic switching {prev_active_gw} -> {new_active_gw}",
+                    syslog.LOG_NOTICE)
+            current_active_gw = new_active_gw
+
             # Apply changes to pf tables
             with active_tables_lock:
                 for i in range(num_probed):
@@ -431,6 +463,14 @@ def probe_rule_loop(rule):
             # Update state file and notify dns_watcher
             write_state()
             notify_dns_watcher()
+
+            # Log final state summary
+            gw_summary = []
+            for i in range(num_probed):
+                s = "active" if gw_states[i]["available"] else "standby"
+                gw_summary.append(f"{gateways[i]}={s}")
+            gw_summary.append(f"{gateways[-1]}=fallback")
+            log(f"[switch] '{desc}' gateway status: {', '.join(gw_summary)}")
 
         # Wait for next probe cycle
         shutdown_event.wait(probe_interval)
