@@ -185,9 +185,10 @@
             unselItems.forEach(function(o) { html += li(o, false); });
             html += '</ul></div>';
 
+            // Hide original select, append our widget next to it
             $select.hide();
             $row.find(".bootstrap-select").hide();
-            $row.find(".col-sm-8, .col-md-9, .col-xs-12").first().append(html);
+            $select.parent().append(html);
 
             var $list = $("#gwList");
 
