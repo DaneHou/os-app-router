@@ -57,7 +57,9 @@ install-plugin:
 	@mkdir -p $(PLUGIN_SCRIPTS)
 	@cp src/opnsense/scripts/OPNsense/Approuter/list_updater.py $(PLUGIN_SCRIPTS)/
 	@cp src/opnsense/scripts/OPNsense/Approuter/dns_watcher.py $(PLUGIN_SCRIPTS)/
+	@cp src/opnsense/scripts/OPNsense/Approuter/geo_prober.py $(PLUGIN_SCRIPTS)/
 	@cp src/opnsense/scripts/OPNsense/Approuter/table_manager.sh $(PLUGIN_SCRIPTS)/
+	@cp src/opnsense/scripts/OPNsense/Approuter/diagnose.sh $(PLUGIN_SCRIPTS)/
 	@cp src/opnsense/scripts/OPNsense/Approuter/app_categories.json $(PLUGIN_SCRIPTS)/
 	@chmod +x $(PLUGIN_SCRIPTS)/*.py
 	@chmod +x $(PLUGIN_SCRIPTS)/*.sh
@@ -86,11 +88,13 @@ install-plugin:
 
 activate:
 	@echo ">>> Activating plugin..."
-	@# Flush all caches so changes take effect
+	@# Flush ALL caches so changes take effect (Volt templates, menu, opcache)
 	@rm -f /tmp/opnsense_menu_cache.xml 2>/dev/null || true
 	@rm -f /tmp/*.cache 2>/dev/null || true
 	@rm -rf /tmp/opnsense_volt_templates 2>/dev/null || true
 	@rm -rf /var/cache/opnsense 2>/dev/null || true
+	@rm -rf $(PLUGIN_MVC)/cache/* 2>/dev/null || true
+	@rm -rf $(DESTDIR)$(PREFIX)/opnsense/mvc/app/cache/* 2>/dev/null || true
 	@# Verify PHP syntax
 	@find $(PLUGIN_MVC)/controllers/OPNsense/Approuter -name '*.php' -exec php -l {} \; 2>&1 | grep -v "No syntax errors" || true
 	@find $(PLUGIN_MVC)/models/OPNsense/Approuter -name '*.php' -exec php -l {} \; 2>&1 | grep -v "No syntax errors" || true
@@ -105,13 +109,18 @@ activate:
 
 uninstall:
 	@echo ">>> Uninstalling $(PLUGIN_NAME)..."
-	@# Stop DNS watcher if running (kill directly, don't rely on script)
+	@# Stop DNS watcher if running
 	@if [ -f /var/run/approuter_dns_watcher.pid ]; then \
 		kill `cat /var/run/approuter_dns_watcher.pid` 2>/dev/null || true; \
 		rm -f /var/run/approuter_dns_watcher.pid; \
 	fi
-	@# Also kill any orphan dns_watcher processes
 	@pkill -f 'dns_watcher.py' 2>/dev/null || true
+	@# Stop Geo prober if running
+	@if [ -f /var/run/approuter_geo_prober.pid ]; then \
+		kill `cat /var/run/approuter_geo_prober.pid` 2>/dev/null || true; \
+		rm -f /var/run/approuter_geo_prober.pid; \
+	fi
+	@pkill -f 'geo_prober.py' 2>/dev/null || true
 	@# Flush pf tables to remove stale routing state
 	@/sbin/pfctl -s Tables 2>/dev/null | grep "^approuter_" | while read table; do \
 		/sbin/pfctl -t "$$table" -T flush 2>/dev/null || true; \
@@ -138,6 +147,8 @@ uninstall:
 	@rm -f $(PLUGIN_CONF)/state.json
 	@rm -rf /var/run/approuter
 	@rm -f /var/run/approuter_dns_watcher.pid
+	@rm -f /var/run/approuter_geo_prober.pid
+	@rm -f $(PLUGIN_CONF)/smart_gateway_state.json
 	@rm -f /tmp/opnsense_menu_cache.xml 2>/dev/null || true
 	@rm -rf /tmp/approuter
 	@# Preserve config.json (user settings) - only remove if explicitly asked
@@ -185,6 +196,7 @@ lint:
 	@echo ">>> Checking Python scripts..."
 	@python3 -m py_compile src/opnsense/scripts/OPNsense/Approuter/list_updater.py
 	@python3 -m py_compile src/opnsense/scripts/OPNsense/Approuter/dns_watcher.py
+	@python3 -m py_compile src/opnsense/scripts/OPNsense/Approuter/geo_prober.py
 	@echo ">>> Checking XML files..."
 	@find src -name '*.xml' -exec xmllint --noout {} \; 2>/dev/null || echo "(xmllint not available, skipping)"
 	@echo ">>> All checks passed."
