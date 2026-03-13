@@ -61,51 +61,67 @@ class SettingsController extends ApiMutableModelControllerBase
             $result['rule']['customDomains'] = $this->extractCsvValue($result['rule']['customDomains'] ?? '');
 
             // Augment gateway: CSVListField → multi-select with ordering
-            // Uses configctl with timeout to prevent hanging (configd socket can block)
+            $gwValue = $this->extractCsvValue($result['rule']['gateway'] ?? '');
+            $gwSelected = array_filter(array_map('trim', explode(',', $gwValue)));
+            $gwOptions = [];
+            $gateways = null;
+            // Method 1: exec with timeout (fast, non-blocking)
             try {
-                $gwValue = $this->extractCsvValue($result['rule']['gateway'] ?? '');
-                $gwSelected = array_filter(array_map('trim', explode(',', $gwValue)));
-                $gwOptions = [];
                 $gwLines = [];
-                exec('timeout 3 configctl interface gateways status 2>/dev/null', $gwLines);
-                $gateways = json_decode(implode('', $gwLines), true);
-                if (is_array($gateways)) {
-                    foreach ($gateways as $gwData) {
-                        if (!is_array($gwData)) {
-                            continue;
-                        }
-                        $name = $gwData['name'] ?? '';
-                        if (empty($name)) {
-                            continue;
-                        }
-                        $label = $name;
-                        if (!empty($gwData['status_translated'])) {
-                            $label .= ' (' . $gwData['status_translated'] . ')';
-                        }
-                        if (!empty($gwData['address'])) {
-                            $label .= ' [' . $gwData['address'] . ']';
-                        }
-                        $gwOptions[$name] = [
-                            'value' => $label,
-                            'selected' => in_array($name, $gwSelected) ? 1 : 0,
-                        ];
-                    }
+                exec('/usr/bin/timeout 3 /usr/local/sbin/configctl interface gateways status 2>/dev/null', $gwLines);
+                $gwJson = implode('', $gwLines);
+                if (!empty($gwJson)) {
+                    $gateways = json_decode($gwJson, true);
                 }
-                // Ensure saved gateways that no longer exist still show up
-                foreach ($gwSelected as $gw) {
-                    if (!empty($gw) && !isset($gwOptions[$gw])) {
-                        $gwOptions[$gw] = [
-                            'value' => $gw,
-                            'selected' => 1,
-                        ];
-                    }
-                }
-                $result['rule']['gateway'] = $gwOptions;
-                // Also provide the ordered gateway list for the UI
-                $result['rule']['gateway_order'] = $gwValue;
             } catch (\Throwable $e) {
-                // Keep gateway as plain text if augmentation fails
+                // fall through to method 2
             }
+            // Method 2: Backend class (may be slower but more reliable)
+            if (!is_array($gateways) || empty($gateways)) {
+                try {
+                    $backend = new Backend();
+                    $response = trim($backend->configdRun('interface gateways status'));
+                    if (!empty($response)) {
+                        $gateways = json_decode($response, true);
+                    }
+                } catch (\Throwable $e) {
+                    // both methods failed
+                }
+            }
+            if (is_array($gateways)) {
+                foreach ($gateways as $gwData) {
+                    if (!is_array($gwData)) {
+                        continue;
+                    }
+                    $name = $gwData['name'] ?? '';
+                    if (empty($name)) {
+                        continue;
+                    }
+                    $label = $name;
+                    if (!empty($gwData['status_translated'])) {
+                        $label .= ' (' . $gwData['status_translated'] . ')';
+                    }
+                    if (!empty($gwData['address'])) {
+                        $label .= ' [' . $gwData['address'] . ']';
+                    }
+                    $gwOptions[$name] = [
+                        'value' => $label,
+                        'selected' => in_array($name, $gwSelected) ? 1 : 0,
+                    ];
+                }
+            }
+            // Always ensure saved gateways appear as options (even if configctl failed)
+            foreach ($gwSelected as $gw) {
+                if (!empty($gw) && !isset($gwOptions[$gw])) {
+                    $gwOptions[$gw] = [
+                        'value' => $gw,
+                        'selected' => 1,
+                    ];
+                }
+            }
+            // gateway MUST be an options object for select_multiple, never a string
+            $result['rule']['gateway'] = $gwOptions;
+            $result['rule']['gateway_order'] = $gwValue;
 
             // Augment categories: CSVListField → select_multiple options
             try {
