@@ -45,7 +45,7 @@ class SettingsController extends ApiMutableModelControllerBase
     {
         return $this->searchBase(
             'rules.rule',
-            ['enabled', 'description', 'sourceNets', 'categories', 'customDomains', 'gateway', 'interface'],
+            ['enabled', 'description', 'sourceNets', 'categories', 'customDomains', 'gateway', 'interface', 'smartGateway'],
             'description'
         );
     }
@@ -60,11 +60,12 @@ class SettingsController extends ApiMutableModelControllerBase
             $result['rule']['sourceNets'] = $this->extractCsvValue($result['rule']['sourceNets'] ?? '');
             $result['rule']['customDomains'] = $this->extractCsvValue($result['rule']['customDomains'] ?? '');
 
-            // Augment gateway: TextField → dropdown options
+            // Augment gateway: CSVListField → multi-select with ordering
             // Uses configctl with timeout to prevent hanging (configd socket can block)
             try {
                 $gwValue = $this->extractCsvValue($result['rule']['gateway'] ?? '');
-                $gwOptions = ['' => ['value' => '(none)', 'selected' => empty($gwValue) ? 1 : 0]];
+                $gwSelected = array_filter(array_map('trim', explode(',', $gwValue)));
+                $gwOptions = [];
                 $gwLines = [];
                 exec('timeout 3 configctl interface gateways status 2>/dev/null', $gwLines);
                 $gateways = json_decode(implode('', $gwLines), true);
@@ -86,17 +87,22 @@ class SettingsController extends ApiMutableModelControllerBase
                         }
                         $gwOptions[$name] = [
                             'value' => $label,
-                            'selected' => ($name === $gwValue) ? 1 : 0,
+                            'selected' => in_array($name, $gwSelected) ? 1 : 0,
                         ];
                     }
                 }
-                if (!empty($gwValue) && !isset($gwOptions[$gwValue])) {
-                    $gwOptions[$gwValue] = [
-                        'value' => $gwValue,
-                        'selected' => 1,
-                    ];
+                // Ensure saved gateways that no longer exist still show up
+                foreach ($gwSelected as $gw) {
+                    if (!empty($gw) && !isset($gwOptions[$gw])) {
+                        $gwOptions[$gw] = [
+                            'value' => $gw,
+                            'selected' => 1,
+                        ];
+                    }
                 }
                 $result['rule']['gateway'] = $gwOptions;
+                // Also provide the ordered gateway list for the UI
+                $result['rule']['gateway_order'] = $gwValue;
             } catch (\Throwable $e) {
                 // Keep gateway as plain text if augmentation fails
             }
