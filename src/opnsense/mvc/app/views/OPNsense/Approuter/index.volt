@@ -102,17 +102,126 @@
             toggleSmartGatewayFields();
         });
 
-        // After getRule loads data, refresh selectpicker so gateway options show
+        // After getRule loads data, refresh selectpicker and build priority panel
+        var _gwOrder = "";
         $(document).ajaxComplete(function(event, xhr, settings) {
             if (settings.url && settings.url.indexOf('/api/approuter/settings/getRule') === 0) {
+                try {
+                    var d = JSON.parse(xhr.responseText);
+                    _gwOrder = (d && d.rule && d.rule.gateway_order) ? d.rule.gateway_order : "";
+                } catch(e) { _gwOrder = ""; }
                 setTimeout(function() {
                     if ($("#DialogRule").is(":visible")) {
                         $("#rule\\.gateway").selectpicker('refresh');
                         toggleSmartGatewayFields();
+                        buildGwPriority();
                     }
                 }, 300);
             }
         });
+
+        // When user changes gateway selection, rebuild priority panel
+        $(document).on("change", "#rule\\.gateway", function() {
+            buildGwPriority();
+        });
+
+        function buildGwPriority() {
+            var $select = $("#rule\\.gateway");
+            if ($select.length === 0) return;
+
+            // Remove old panel
+            $("#gwPriorityPanel").remove();
+
+            // Get selected values
+            var selected = $select.val() || [];
+            if (selected.length < 2) return; // No ordering needed for 0-1 gateways
+
+            // Restore saved order: reorder selected to match _gwOrder
+            if (_gwOrder) {
+                var orderArr = _gwOrder.split(",").map(function(s){return s.trim();}).filter(Boolean);
+                var ordered = [];
+                orderArr.forEach(function(v) {
+                    if (selected.indexOf(v) >= 0) ordered.push(v);
+                });
+                // Add any selected not in saved order
+                selected.forEach(function(v) {
+                    if (ordered.indexOf(v) < 0) ordered.push(v);
+                });
+                selected = ordered;
+            }
+
+            // Get labels from select options
+            var labelMap = {};
+            $select.find("option").each(function() {
+                labelMap[$(this).val()] = $(this).text();
+            });
+
+            // Build panel HTML
+            var html = '<div id="gwPriorityPanel" style="margin-top:8px;padding:8px;border:1px solid #ddd;border-radius:4px;background:#fafafa">';
+            html += '<small style="color:#888"><i class="fa fa-sort"></i> {{ lang._("Priority Order") }} ({{ lang._("first = highest") }}):</small>';
+            html += '<table style="width:100%;margin-top:4px">';
+            for (var i = 0; i < selected.length; i++) {
+                var v = selected[i];
+                var lbl = $('<span>').text(labelMap[v] || v).html();
+                var isFallback = (i === selected.length - 1);
+                var badge = isFallback ? '<span class="label label-default" style="margin-left:6px">fallback</span>' : '';
+                html += '<tr data-gw="' + v + '">';
+                html += '<td style="width:30px;font-weight:bold;color:#337ab7">' + (i+1) + '.</td>';
+                html += '<td>' + lbl + badge + '</td>';
+                html += '<td style="width:60px;text-align:right">';
+                if (i > 0) {
+                    html += '<button type="button" class="btn btn-xs btn-default gw-mv-up" title="Move up"><i class="fa fa-arrow-up"></i></button> ';
+                }
+                if (i < selected.length - 1) {
+                    html += '<button type="button" class="btn btn-xs btn-default gw-mv-down" title="Move down"><i class="fa fa-arrow-down"></i></button>';
+                }
+                html += '</td></tr>';
+            }
+            html += '</table></div>';
+
+            // Insert after the bootstrap-select container
+            $select.closest(".form-group, div").find(".bootstrap-select").first().after(html);
+            // Fallback: if bootstrap-select not found, append to select's parent
+            if ($("#gwPriorityPanel").length === 0) {
+                $select.parent().append(html);
+            }
+
+            // Button handlers
+            $("#gwPriorityPanel").on("click", ".gw-mv-up", function(e) {
+                e.preventDefault();
+                var $tr = $(this).closest("tr");
+                $tr.prev("tr").before($tr);
+                syncGwOrder();
+            });
+            $("#gwPriorityPanel").on("click", ".gw-mv-down", function(e) {
+                e.preventDefault();
+                var $tr = $(this).closest("tr");
+                $tr.next("tr").after($tr);
+                syncGwOrder();
+            });
+        }
+
+        function syncGwOrder() {
+            var $select = $("#rule\\.gateway");
+            var newOrder = [];
+            $("#gwPriorityPanel tr[data-gw]").each(function() {
+                newOrder.push($(this).data("gw"));
+            });
+            // Reorder <option> DOM so OPNsense serializes CSV in this order
+            var $opts = $select.find("option").detach();
+            var optMap = {};
+            $opts.each(function() { optMap[$(this).val()] = $(this); });
+            // Selected in priority order first
+            newOrder.forEach(function(v) {
+                if (optMap[v]) { $select.append(optMap[v]); delete optMap[v]; }
+            });
+            // Remaining unselected
+            for (var k in optMap) $select.append(optMap[k]);
+            // Update saved order for next rebuild
+            _gwOrder = newOrder.join(",");
+            // Rebuild panel to update numbers and buttons
+            buildGwPriority();
+        }
 
         $("#grid-rules").UIBootgrid({
             'search':'/api/approuter/settings/searchRule',
