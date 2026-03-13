@@ -146,7 +146,7 @@ def get_gateway_interface(gw_name):
                 continue
             try:
                 result = subprocess.run(
-                    ["/usr/bin/route", "-n", "get", addr],
+                    ["/sbin/route", "-n", "get", addr],
                     capture_output=True, text=True, timeout=5
                 )
                 for line in result.stdout.splitlines():
