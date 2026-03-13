@@ -53,9 +53,39 @@
                     <Mask>/^[a-z0-9_.,]+$/</Mask>
                     <ValidationMessage>Select at least one app category</ValidationMessage>
                 </categories>
-                <gateway type="TextField">
+                <gateway type="CSVListField">
                     <Required>Y</Required>
+                    <FieldSeparator>,</FieldSeparator>
+                    <Mask>/^[a-zA-Z0-9_,\s]+$/</Mask>
+                    <ValidationMessage>Enter one or more gateway names separated by commas</ValidationMessage>
                 </gateway>
+                <smartGateway type="BooleanField">
+                    <Default>0</Default>
+                    <Required>Y</Required>
+                </smartGateway>
+                <probeUrl type="TextField">
+                    <Required>N</Required>
+                </probeUrl>
+                <probeInterval type="IntegerField">
+                    <Default>300</Default>
+                    <MinimumValue>30</MinimumValue>
+                    <MaximumValue>3600</MaximumValue>
+                    <Required>N</Required>
+                    <ValidationMessage>Enter a value between 30 and 3600 seconds</ValidationMessage>
+                </probeInterval>
+                <probeMethod type="OptionField">
+                    <Default>connect_only</Default>
+                    <OptionValues>
+                        <connect_only>TCP/TLS Connect Test</connect_only>
+                        <status_code>HTTP Status Code</status_code>
+                        <body_match>Response Body Match</body_match>
+                        <latency>Latency Optimization</latency>
+                    </OptionValues>
+                    <Required>N</Required>
+                </probeMethod>
+                <probePattern type="TextField">
+                    <Required>N</Required>
+                </probePattern>
                 <customDomains type="TextField">
                     <Required>N</Required>
                     <Mask>/^[a-z0-9_.,\-]*$/i</Mask>

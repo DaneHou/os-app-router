@@ -68,7 +68,23 @@ function approuter_firewall(\OPNsense\Firewall\Plugin $fw)
             'customDomains' => (string)$rule->customDomains,
             'gateway' => (string)$rule->gateway,
             'interface' => (string)$rule->interface,
+            'smartGateway' => (string)$rule->smartGateway,
         ];
+    }
+
+    // Collect smart gateway info per category for registering _gwN tables
+    $smartGwPerCategory = [];
+    foreach ($rules as $rule) {
+        $gateways = array_filter(array_map('trim', explode(',', $rule['gateway'])));
+        $isSmart = ($rule['smartGateway'] === '1' && count($gateways) > 1);
+        if ($isSmart) {
+            foreach ($rule['categories'] as $cat) {
+                $cat = trim($cat);
+                if (!empty($cat)) {
+                    $smartGwPerCategory[$cat] = count($gateways);
+                }
+            }
+        }
     }
 
     // Register pf tables for each needed category (supports dotted notation: "video.bilibili")
@@ -90,6 +106,18 @@ function approuter_firewall(\OPNsense\Firewall\Plugin $fw)
             $fw->registerTable($tableName, [
                 'persist' => true,
             ]);
+        }
+
+        // Register _gwN tables for smart gateway categories
+        if (isset($smartGwPerCategory[$category])) {
+            $gwCount = $smartGwPerCategory[$category];
+            // Register _gw0 through _gw(N-2) (last gateway uses main table)
+            for ($i = 0; $i < $gwCount - 1; $i++) {
+                $gwTableName = $tableName . '_gw' . $i;
+                $fw->registerTable($gwTableName, [
+                    'persist' => true,
+                ]);
+            }
         }
     }
 
@@ -124,6 +152,9 @@ function approuter_firewall(\OPNsense\Firewall\Plugin $fw)
             $fromClause = '<' . $clientTableName . '>';
         }
 
+        $gateways = array_filter(array_map('trim', explode(',', $rule['gateway'])));
+        $isSmart = ($rule['smartGateway'] === '1' && count($gateways) > 1);
+
         // Register custom domains table if rule has customDomains
         if (!empty($rule['customDomains'])) {
             $customTableName = $tablePrefix . '_custom_' . substr(md5($rule['uuid']), 0, 8);
@@ -132,22 +163,64 @@ function approuter_firewall(\OPNsense\Firewall\Plugin $fw)
             ]);
             $validCustomTables[] = $customTableName;
 
-            $description = 'AppRouter: ' . ($rule['description'] ?: 'custom domains') . ' via ' . $rule['gateway'];
-            $fw->registerFilterRule(
-                $priority,
-                [
-                    'from' => $fromClause,
-                    'to' => '<' . $customTableName . '>',
-                    'gateway' => $rule['gateway'],
-                    'direction' => 'in',
-                    'interface' => $rule['interface'],
-                    'descr' => $description,
-                    'quick' => true,
-                    'log' => false,
-                    '#ref' => 'approuter:' . $rule['uuid'] . ':custom',
-                ]
-            );
-            $priority++;
+            if ($isSmart) {
+                // Smart mode: register _gwN tables and N rules for custom domains
+                for ($i = 0; $i < count($gateways) - 1; $i++) {
+                    $gwCustomTable = $customTableName . '_gw' . $i;
+                    $fw->registerTable($gwCustomTable, ['persist' => true]);
+                    $description = 'AppRouter: ' . ($rule['description'] ?: 'custom domains') . ' via ' . trim($gateways[$i]) . ' [smart gw' . $i . ']';
+                    $fw->registerFilterRule(
+                        $priority,
+                        [
+                            'from' => $fromClause,
+                            'to' => '<' . $gwCustomTable . '>',
+                            'gateway' => trim($gateways[$i]),
+                            'direction' => 'in',
+                            'interface' => $rule['interface'],
+                            'descr' => $description,
+                            'quick' => true,
+                            'log' => false,
+                            '#ref' => 'approuter:' . $rule['uuid'] . ':custom:gw' . $i,
+                        ]
+                    );
+                    $priority++;
+                }
+                // Fallback: last gateway uses main custom table
+                $description = 'AppRouter: ' . ($rule['description'] ?: 'custom domains') . ' via ' . trim(end($gateways)) . ' [fallback]';
+                $fw->registerFilterRule(
+                    $priority,
+                    [
+                        'from' => $fromClause,
+                        'to' => '<' . $customTableName . '>',
+                        'gateway' => trim(end($gateways)),
+                        'direction' => 'in',
+                        'interface' => $rule['interface'],
+                        'descr' => $description,
+                        'quick' => true,
+                        'log' => false,
+                        '#ref' => 'approuter:' . $rule['uuid'] . ':custom',
+                    ]
+                );
+                $priority++;
+            } else {
+                // Non-smart: single rule with first gateway
+                $description = 'AppRouter: ' . ($rule['description'] ?: 'custom domains') . ' via ' . trim($gateways[0]);
+                $fw->registerFilterRule(
+                    $priority,
+                    [
+                        'from' => $fromClause,
+                        'to' => '<' . $customTableName . '>',
+                        'gateway' => trim($gateways[0]),
+                        'direction' => 'in',
+                        'interface' => $rule['interface'],
+                        'descr' => $description,
+                        'quick' => true,
+                        'log' => false,
+                        '#ref' => 'approuter:' . $rule['uuid'] . ':custom',
+                    ]
+                );
+                $priority++;
+            }
         }
 
         foreach ($rule['categories'] as $category) {
@@ -157,23 +230,65 @@ function approuter_firewall(\OPNsense\Firewall\Plugin $fw)
             }
 
             $tableName = $tablePrefix . '_' . str_replace('.', '_', $category);
-            $description = 'AppRouter: ' . ($rule['description'] ?: $category) . ' via ' . $rule['gateway'];
 
-            $fw->registerFilterRule(
-                $priority,
-                [
-                    'from' => $fromClause,
-                    'to' => '<' . $tableName . '>',
-                    'gateway' => $rule['gateway'],
-                    'direction' => 'in',
-                    'interface' => $rule['interface'],
-                    'descr' => $description,
-                    'quick' => true,
-                    'log' => false,
-                    '#ref' => 'approuter:' . $rule['uuid'],
-                ]
-            );
-            $priority++;
+            if ($isSmart) {
+                // Smart mode: N rules with priority ordering
+                // GW0..GWn-2 use _gwN tables (empty by default, filled by prober)
+                for ($i = 0; $i < count($gateways) - 1; $i++) {
+                    $gwTableName = $tableName . '_gw' . $i;
+                    $description = 'AppRouter: ' . ($rule['description'] ?: $category) . ' via ' . trim($gateways[$i]) . ' [smart gw' . $i . ']';
+                    $fw->registerFilterRule(
+                        $priority,
+                        [
+                            'from' => $fromClause,
+                            'to' => '<' . $gwTableName . '>',
+                            'gateway' => trim($gateways[$i]),
+                            'direction' => 'in',
+                            'interface' => $rule['interface'],
+                            'descr' => $description,
+                            'quick' => true,
+                            'log' => false,
+                            '#ref' => 'approuter:' . $rule['uuid'] . ':gw' . $i,
+                        ]
+                    );
+                    $priority++;
+                }
+                // Last gateway: fallback using main table (always has IPs)
+                $description = 'AppRouter: ' . ($rule['description'] ?: $category) . ' via ' . trim(end($gateways)) . ' [fallback]';
+                $fw->registerFilterRule(
+                    $priority,
+                    [
+                        'from' => $fromClause,
+                        'to' => '<' . $tableName . '>',
+                        'gateway' => trim(end($gateways)),
+                        'direction' => 'in',
+                        'interface' => $rule['interface'],
+                        'descr' => $description,
+                        'quick' => true,
+                        'log' => false,
+                        '#ref' => 'approuter:' . $rule['uuid'],
+                    ]
+                );
+                $priority++;
+            } else {
+                // Non-smart: single rule with first gateway (existing behavior)
+                $description = 'AppRouter: ' . ($rule['description'] ?: $category) . ' via ' . trim($gateways[0]);
+                $fw->registerFilterRule(
+                    $priority,
+                    [
+                        'from' => $fromClause,
+                        'to' => '<' . $tableName . '>',
+                        'gateway' => trim($gateways[0]),
+                        'direction' => 'in',
+                        'interface' => $rule['interface'],
+                        'descr' => $description,
+                        'quick' => true,
+                        'log' => false,
+                        '#ref' => 'approuter:' . $rule['uuid'],
+                    ]
+                );
+                $priority++;
+            }
         }
     }
 
@@ -184,16 +299,57 @@ function approuter_firewall(\OPNsense\Firewall\Plugin $fw)
         }
     }
 
-    // Clean up orphaned custom/client pf tables from deleted rules
+    // Build set of valid _gwN table names from smart gateway rules
+    $validGwTables = [];
+    foreach ($rules as $rule) {
+        $gateways = array_filter(array_map('trim', explode(',', $rule['gateway'])));
+        $isSmart = ($rule['smartGateway'] === '1' && count($gateways) > 1);
+        if (!$isSmart) {
+            continue;
+        }
+        foreach ($rule['categories'] as $cat) {
+            $cat = trim($cat);
+            if (empty($cat)) {
+                continue;
+            }
+            $tableName = $tablePrefix . '_' . str_replace('.', '_', $cat);
+            for ($i = 0; $i < count($gateways) - 1; $i++) {
+                $validGwTables[] = $tableName . '_gw' . $i;
+            }
+        }
+        if (!empty($rule['customDomains'])) {
+            $customTableName = $tablePrefix . '_custom_' . substr(md5($rule['uuid']), 0, 8);
+            for ($i = 0; $i < count($gateways) - 1; $i++) {
+                $validGwTables[] = $customTableName . '_gw' . $i;
+            }
+        }
+    }
+
+    // Clean up orphaned custom/client/gw pf tables from deleted rules
     $pfTables = [];
     exec('/sbin/pfctl -s Tables 2>/dev/null', $pfTables);
     foreach ($pfTables as $t) {
         $t = trim($t);
-        if (preg_match('/_custom_[0-9a-f]{8}$/', $t) && !in_array($t, $validCustomTables)) {
+        if (preg_match('/_custom_[0-9a-f]{8}(_gw\d+)?$/', $t)) {
+            // Custom table or custom _gwN table
+            $baseCustom = preg_replace('/_gw\d+$/', '', $t);
+            if (strpos($t, '_gw') !== false) {
+                if (!in_array($t, $validGwTables)) {
+                    exec('/sbin/pfctl -t ' . escapeshellarg($t) . ' -T flush 2>/dev/null');
+                    exec('/sbin/pfctl -t ' . escapeshellarg($t) . ' -T kill 2>/dev/null');
+                    syslog(LOG_NOTICE, "approuter: removed orphaned table $t");
+                }
+            } elseif (!in_array($t, $validCustomTables)) {
+                exec('/sbin/pfctl -t ' . escapeshellarg($t) . ' -T flush 2>/dev/null');
+                exec('/sbin/pfctl -t ' . escapeshellarg($t) . ' -T kill 2>/dev/null');
+                syslog(LOG_NOTICE, "approuter: removed orphaned table $t");
+            }
+        } elseif (preg_match('/_clients_[0-9a-f]{8}$/', $t) && !in_array($t . '.txt', $validClientFiles)) {
             exec('/sbin/pfctl -t ' . escapeshellarg($t) . ' -T flush 2>/dev/null');
             exec('/sbin/pfctl -t ' . escapeshellarg($t) . ' -T kill 2>/dev/null');
             syslog(LOG_NOTICE, "approuter: removed orphaned table $t");
-        } elseif (preg_match('/_clients_[0-9a-f]{8}$/', $t) && !in_array($t . '.txt', $validClientFiles)) {
+        } elseif (preg_match('/_gw\d+$/', $t) && strpos($t, $tablePrefix . '_') === 0 && !in_array($t, $validGwTables)) {
+            // Orphaned _gwN table from category rules
             exec('/sbin/pfctl -t ' . escapeshellarg($t) . ' -T flush 2>/dev/null');
             exec('/sbin/pfctl -t ' . escapeshellarg($t) . ' -T kill 2>/dev/null');
             syslog(LOG_NOTICE, "approuter: removed orphaned table $t");
@@ -220,6 +376,30 @@ function approuter_services()
             'name' => 'approuter_dns_watcher',
             'pidfile' => '/var/run/approuter_dns_watcher.pid',
         ];
+
+        // Register geo_prober service if any rule has smartGateway enabled
+        $hasSmartRules = false;
+        foreach ($mdl->rules->rule->iterateItems() as $uuid => $rule) {
+            if ((string)$rule->enabled === '1' && (string)$rule->smartGateway === '1') {
+                $gateways = array_filter(array_map('trim', explode(',', (string)$rule->gateway)));
+                if (count($gateways) > 1) {
+                    $hasSmartRules = true;
+                    break;
+                }
+            }
+        }
+        if ($hasSmartRules) {
+            $services[] = [
+                'description' => gettext('AppRouter Geo Prober'),
+                'configd' => [
+                    'restart' => ['approuter geo_prober_start'],
+                    'start' => ['approuter geo_prober_start'],
+                    'stop' => ['approuter geo_prober_stop'],
+                ],
+                'name' => 'approuter_geo_prober',
+                'pidfile' => '/var/run/approuter_geo_prober.pid',
+            ];
+        }
     }
 
     return $services;
@@ -232,7 +412,7 @@ function approuter_syslog()
 {
     $logfacilities = [];
     $logfacilities['approuter'] = [
-        'facility' => ['approuter', 'approuter-dns'],
+        'facility' => ['approuter', 'approuter-dns', 'approuter-geo'],
     ];
     return $logfacilities;
 }
