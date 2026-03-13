@@ -159,17 +159,15 @@
         $(document).on("change", "#rule\\.smartGateway", toggleSmartGatewayFields);
         $(document).on("change", "#rule\\.probeMethod", toggleSmartGatewayFields);
 
-        // Toggle fields when dialog opens + build gateway sortable
+        // Toggle fields when dialog opens (sortable built after data loads)
         $(document).on("shown.bs.modal", "#DialogRule", function() {
             toggleSmartGatewayFields();
-            buildGatewaySortable();
         });
 
-        // Store gateway_order from getRule API response
+        // Store gateway_order from getRule API response, then build sortable
         var _lastGatewayOrder = "";
-        // Intercept AJAX responses to capture gateway_order from getRule
         $(document).ajaxComplete(function(event, xhr, settings) {
-            if (settings.url && settings.url.indexOf('/api/approuter/settings/getRule/') === 0) {
+            if (settings.url && settings.url.indexOf('/api/approuter/settings/getRule') === 0) {
                 try {
                     var data = JSON.parse(xhr.responseText);
                     if (data && data.rule && data.rule.gateway_order) {
@@ -178,6 +176,13 @@
                         _lastGatewayOrder = "";
                     }
                 } catch(e) {}
+                // Wait for OPNsense to map data to form, then build sortable
+                setTimeout(function() {
+                    if ($("#DialogRule").is(":visible")) {
+                        toggleSmartGatewayFields();
+                        buildGatewaySortable();
+                    }
+                }, 300);
             }
         });
 
@@ -597,10 +602,10 @@
         {'id': 'rule.customDomains', 'label': lang._('Custom Domains'), 'type': 'text', 'help': lang._('Comma-separated domains (e.g. example.com, cdn.test.org). All subdomains matched automatically.')},
         {'id': 'rule.gateway', 'label': lang._('Gateway'), 'type': 'select_multiple', 'help': lang._('Select gateways in priority order (first = highest priority, last = fallback)')},
         {'id': 'rule.smartGateway', 'label': lang._('Smart Gateway'), 'type': 'checkbox', 'help': lang._('Enable automatic gateway probing and failover (requires 2+ gateways)')},
-        {'id': 'rule.probeUrl', 'label': lang._('Probe URL'), 'type': 'text', 'help': lang._('URL to probe for gateway availability (e.g. https://www.iqiyi.com/)')},
-        {'id': 'rule.probeInterval', 'label': lang._('Probe Interval'), 'type': 'text', 'help': lang._('Probe interval in seconds (30-3600, default: 300)')},
-        {'id': 'rule.probeMethod', 'label': lang._('Probe Method'), 'type': 'dropdown', 'help': lang._('How to test gateway availability')},
-        {'id': 'rule.probePattern', 'label': lang._('Probe Pattern'), 'type': 'text', 'help': lang._('Regex pattern for body_match method (match = geo-restricted)')}
+        {'id': 'rule.probeUrl', 'label': lang._('Probe URL'), 'type': 'text', 'help': lang._('URL to test through each gateway. Leave empty to use https://www.google.com. Examples: https://www.iqiyi.com/ (video), https://music.163.com/ (music)')},
+        {'id': 'rule.probeInterval', 'label': lang._('Probe Interval'), 'type': 'text', 'help': lang._('Seconds between probes (30-3600, default 300). Lower = faster failover but more traffic')},
+        {'id': 'rule.probeMethod', 'label': lang._('Probe Method'), 'type': 'dropdown', 'help': lang._('Connect: TCP reachability. Status Code: HTTP 403/451 = blocked. Body Match: regex on response body. Latency: pick fastest gateway')},
+        {'id': 'rule.probePattern', 'label': lang._('Probe Pattern'), 'type': 'text', 'help': lang._('Regex to detect geo-restriction in response body. Match = blocked. Example: 地区限制|not available|geo.restricted')}
     ],
     'id':'DialogRule',
     'label':lang._('Edit Routing Rule')
