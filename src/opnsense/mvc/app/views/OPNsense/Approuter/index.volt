@@ -17,22 +17,6 @@
     AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
 #}
 
-<style>
-    .gw-list { list-style:none; padding:0; margin:5px 0; }
-    .gw-list li {
-        padding:5px 8px; margin-bottom:2px; border:1px solid #ddd;
-        border-radius:3px; background:#fff; display:flex; align-items:center;
-    }
-    .gw-list li.gw-on { background:#f0f8ff; border-color:#5bc0de; }
-    .gw-list .gw-rank { font-weight:bold; min-width:22px; color:#337ab7; }
-    .gw-list .gw-lbl { flex:1; margin:0 6px; }
-    .gw-list .gw-arrows { white-space:nowrap; }
-    .gw-list .gw-arrows .btn { padding:1px 5px; font-size:11px; margin-left:2px; }
-    .gw-list .gw-sep {
-        border:none; padding:2px 8px; color:#999; font-size:11px; text-align:center;
-    }
-</style>
-
 <script>
     $( document ).ready(function() {
         // Tab persistence via URL hash
@@ -118,140 +102,17 @@
             toggleSmartGatewayFields();
         });
 
-        // Store gateway_order from getRule API response, then build sortable
-        var _lastGatewayOrder = "";
+        // After getRule loads data, refresh selectpicker so gateway options show
         $(document).ajaxComplete(function(event, xhr, settings) {
             if (settings.url && settings.url.indexOf('/api/approuter/settings/getRule') === 0) {
-                try {
-                    var data = JSON.parse(xhr.responseText);
-                    if (data && data.rule && data.rule.gateway_order) {
-                        _lastGatewayOrder = data.rule.gateway_order;
-                    } else {
-                        _lastGatewayOrder = "";
-                    }
-                } catch(e) {}
-                // Wait for OPNsense to map data to form, then build sortable
                 setTimeout(function() {
                     if ($("#DialogRule").is(":visible")) {
+                        $("#rule\\.gateway").selectpicker('refresh');
                         toggleSmartGatewayFields();
-                        buildGatewaySortable();
                     }
                 }, 300);
             }
         });
-
-        function buildGatewaySortable() {
-            var $row = $("#row_rule\\.gateway");
-            if ($row.length === 0) return;
-
-            $row.find(".gw-container").remove();
-            $row.find("select").show();
-            $row.find(".bootstrap-select").show();
-
-            var $select = $row.find("select");
-            if ($select.length === 0) return;
-
-            var gatewayOrder = _lastGatewayOrder ? _lastGatewayOrder.split(",").map(function(s){return s.trim();}).filter(Boolean) : [];
-
-            var options = [];
-            $select.find("option").each(function() {
-                options.push({ value: $(this).val(), label: $(this).text(), selected: $(this).is(":selected") });
-            });
-            if (options.length === 0) return;
-
-            // Order: selected first (in saved order), then unselected
-            var selMap = {};
-            options.forEach(function(o) { if (o.selected) selMap[o.value] = o; });
-            var selItems = [];
-            gatewayOrder.forEach(function(v) { if (selMap[v]) { selItems.push(selMap[v]); delete selMap[v]; } });
-            for (var v in selMap) selItems.push(selMap[v]);
-            var unselItems = options.filter(function(o) { return !o.selected; });
-
-            // Build list HTML
-            function li(o, on) {
-                var esc = $('<span>').text(o.label).html();
-                return '<li class="' + (on ? 'gw-on' : '') + '" data-value="' + o.value + '">' +
-                    '<span class="gw-rank"></span>' +
-                    '<input type="checkbox"' + (on ? ' checked' : '') + ' style="margin-right:6px">' +
-                    '<span class="gw-lbl">' + esc + '</span>' +
-                    '<span class="gw-arrows">' +
-                    '<button type="button" class="btn btn-xs btn-default gw-up" title="Move up"><i class="fa fa-arrow-up"></i></button>' +
-                    '<button type="button" class="btn btn-xs btn-default gw-down" title="Move down"><i class="fa fa-arrow-down"></i></button>' +
-                    '</span></li>';
-            }
-            var html = '<div class="gw-container"><ul class="gw-list" id="gwList">';
-            selItems.forEach(function(o) { html += li(o, true); });
-            html += '<li class="gw-sep" data-value="__sep__">--- {{ lang._("Unselected") }} ---</li>';
-            unselItems.forEach(function(o) { html += li(o, false); });
-            html += '</ul></div>';
-
-            // Hide original select, append our widget next to it
-            $select.hide();
-            $row.find(".bootstrap-select").hide();
-            $select.parent().append(html);
-
-            var $list = $("#gwList");
-
-            function sync() {
-                var rank = 1, vals = [];
-                $list.children("li").each(function() {
-                    var v = $(this).data("value");
-                    if (v === "__sep__") return;
-                    var on = $(this).find("input[type=checkbox]").is(":checked");
-                    $(this).toggleClass("gw-on", on);
-                    if (on) {
-                        $(this).find(".gw-rank").text(rank + ".");
-                        $(this).find(".gw-arrows").show();
-                        vals.push(v);
-                        rank++;
-                    } else {
-                        $(this).find(".gw-rank").text("");
-                        $(this).find(".gw-arrows").hide();
-                    }
-                });
-                // Reorder <option> DOM so OPNsense sends CSV in correct order
-                var $opts = $select.find("option").detach();
-                var om = {};
-                $opts.each(function() { om[$(this).val()] = $(this).prop("selected", false); });
-                vals.forEach(function(v) { if (om[v]) { om[v].prop("selected", true); $select.append(om[v]); delete om[v]; } });
-                for (var k in om) $select.append(om[k]);
-                $select.trigger("change");
-            }
-
-            // Up/down buttons
-            $list.on("click", ".gw-up", function(e) {
-                e.preventDefault();
-                var $li = $(this).closest("li");
-                var $prev = $li.prev("li:not(.gw-sep)");
-                if ($prev.length && $prev.find("input").is(":checked")) {
-                    $li.insertBefore($prev);
-                    sync();
-                }
-            });
-            $list.on("click", ".gw-down", function(e) {
-                e.preventDefault();
-                var $li = $(this).closest("li");
-                var $next = $li.next("li:not(.gw-sep)");
-                if ($next.length && $next.find("input").is(":checked")) {
-                    $li.insertAfter($next);
-                    sync();
-                }
-            });
-
-            // Checkbox toggle
-            $list.on("change", "input[type=checkbox]", function() {
-                var $li = $(this).closest("li");
-                var $sep = $list.find(".gw-sep");
-                if ($(this).is(":checked")) {
-                    $sep.before($li);
-                } else {
-                    $list.append($li);
-                }
-                sync();
-            });
-
-            sync();
-        }
 
         $("#grid-rules").UIBootgrid({
             'search':'/api/approuter/settings/searchRule',
