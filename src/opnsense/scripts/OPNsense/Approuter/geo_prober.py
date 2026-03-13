@@ -107,36 +107,62 @@ def load_config():
 
 
 def get_gateway_interface(gw_name):
-    """Get the network interface for a gateway name."""
+    """Get the network interface for a gateway name.
+
+    Tries configctl first (for 'interface' field), then falls back to
+    'route -n get <address>' to find the interface from the routing table.
+    """
     global gw_interface_cache, gw_interface_cache_time
 
     now = time.time()
     if now - gw_interface_cache_time > GW_CACHE_TTL:
+        new_cache = {}
+        gw_addresses = {}
         try:
             result = subprocess.run(
                 ["configctl", "interface", "gateways", "status"],
                 capture_output=True, text=True, timeout=10
             )
             gateways = json.loads(result.stdout)
-            new_cache = {}
-            if isinstance(gateways, dict):
-                for gw_data in gateways.values():
-                    if isinstance(gw_data, dict):
-                        name = gw_data.get("name", "")
-                        iface = gw_data.get("interface", "")
-                        if name and iface:
-                            new_cache[name] = iface
-            elif isinstance(gateways, list):
-                for gw_data in gateways:
-                    if isinstance(gw_data, dict):
-                        name = gw_data.get("name", "")
-                        iface = gw_data.get("interface", "")
-                        if name and iface:
-                            new_cache[name] = iface
-            gw_interface_cache = new_cache
-            gw_interface_cache_time = now
+            gw_list = gateways.values() if isinstance(gateways, dict) else gateways
+            for gw_data in gw_list:
+                if not isinstance(gw_data, dict):
+                    continue
+                name = gw_data.get("name", "")
+                if not name:
+                    continue
+                iface = gw_data.get("interface", "")
+                addr = gw_data.get("address", "")
+                if iface:
+                    new_cache[name] = iface
+                elif addr:
+                    gw_addresses[name] = addr
         except (subprocess.TimeoutExpired, json.JSONDecodeError, OSError) as e:
-            log(f"Failed to refresh gateway interfaces: {e}", syslog.LOG_ERR)
+            log(f"Failed to get gateway status: {e}", syslog.LOG_ERR)
+
+        # Fallback: use 'route -n get <address>' for gateways without interface
+        for name, addr in gw_addresses.items():
+            if name in new_cache:
+                continue
+            try:
+                result = subprocess.run(
+                    ["/usr/bin/route", "-n", "get", addr],
+                    capture_output=True, text=True, timeout=5
+                )
+                for line in result.stdout.splitlines():
+                    line = line.strip()
+                    if line.startswith("interface:"):
+                        iface = line.split(":", 1)[1].strip()
+                        if iface:
+                            new_cache[name] = iface
+                            break
+            except (subprocess.TimeoutExpired, OSError):
+                pass
+
+        if new_cache:
+            log(f"Gateway interfaces: {new_cache}")
+        gw_interface_cache = new_cache
+        gw_interface_cache_time = now
 
     return gw_interface_cache.get(gw_name, "")
 
