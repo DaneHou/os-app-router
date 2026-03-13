@@ -62,7 +62,10 @@ def load_config():
     """Load config.json and return smart gateway rules."""
     try:
         with open(CONFIG_FILE) as f:
-            config = json.load(f)
+            text = f.read()
+        # Strip trailing commas before ] or } (Jinja2 template limitation)
+        text = re.sub(r',\s*([}\]])', r'\1', text)
+        config = json.loads(text)
     except (IOError, json.JSONDecodeError) as e:
         log(f"Failed to load config: {e}", syslog.LOG_ERR)
         return []

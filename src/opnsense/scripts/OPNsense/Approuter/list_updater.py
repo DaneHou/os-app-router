@@ -7,6 +7,7 @@ Runs via configd cron to keep routing data up to date.
 
 import json
 import os
+import re
 import socket
 import sys
 import subprocess
@@ -63,7 +64,10 @@ def ensure_dirs():
 def load_config():
     if os.path.exists(CONFIG_FILE):
         with open(CONFIG_FILE, "r") as f:
-            return json.load(f)
+            text = f.read()
+        # Strip trailing commas before ] or } (Jinja2 template limitation)
+        text = re.sub(r',\s*([}\]])', r'\1', text)
+        return json.loads(text)
     return {}
 
 
