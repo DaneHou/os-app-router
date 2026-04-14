@@ -17,11 +17,17 @@ install: install-plugin activate
 	@echo ""
 	@echo "========================================="
 	@echo " $(PLUGIN_NAME) $(PLUGIN_VERSION) installed"
-	@echo " Navigate to Services > AppRouter in the web UI"
+	@echo " Navigate to Firewall > AppRouter in the web UI"
 	@echo "========================================="
 
 install-plugin:
 	@echo ">>> Installing $(PLUGIN_NAME) $(PLUGIN_VERSION)..."
+	@# Clean up stale files from old namespace (AppRouter → Approuter rename)
+	@rm -rf $(PLUGIN_MVC)/models/OPNsense/AppRouter 2>/dev/null || true
+	@rm -rf $(PLUGIN_MVC)/controllers/OPNsense/AppRouter 2>/dev/null || true
+	@rm -rf $(PLUGIN_MVC)/views/OPNsense/AppRouter 2>/dev/null || true
+	@rm -rf $(DESTDIR)$(PREFIX)/opnsense/scripts/OPNsense/AppRouter 2>/dev/null || true
+	@rm -rf $(PLUGIN_SERVICE)/templates/OPNsense/AppRouter 2>/dev/null || true
 	@# Plugin hook
 	@mkdir -p $(PLUGIN_HOOK)
 	@cp src/etc/inc/plugins.inc.d/approuter.inc $(PLUGIN_HOOK)/approuter.inc
