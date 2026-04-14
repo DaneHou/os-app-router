@@ -1,7 +1,7 @@
 <menu>
-    <Services order="100">
+    <Firewall order="100">
         <Approuter VisibleName="AppRouter" cssclass="fa fa-random" url="/ui/approuter" order="50">
             <Settings VisibleName="Settings" url="/ui/approuter" order="10" />
         </Approuter>
-    </Services>
+    </Firewall>
 </menu>
