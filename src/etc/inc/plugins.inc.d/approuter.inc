@@ -125,6 +125,14 @@ function approuter_firewall(\OPNsense\Firewall\Plugin $fw)
     $validClientFiles = [];
     $validCustomTables = [];
 
+    // Defaults required by OPNsense's FilterRule compiler (type, ipprotocol, etc.)
+    $filterDefaults = [
+        'type' => 'pass',
+        'quick' => true,
+        'ipprotocol' => 'inet',
+        'statetype' => 'keep',
+    ];
+
     // Generate pf filter rules
     $priority = 1;
     foreach ($rules as $rule) {
@@ -178,10 +186,9 @@ function approuter_firewall(\OPNsense\Firewall\Plugin $fw)
                             'direction' => 'in',
                             'interface' => $rule['interface'],
                             'descr' => $description,
-                            'quick' => true,
-                            'log' => false,
                             '#ref' => 'approuter:' . $rule['uuid'] . ':custom:gw' . $i,
-                        ]
+                        ],
+                        $filterDefaults
                     );
                     $priority++;
                 }
@@ -196,10 +203,9 @@ function approuter_firewall(\OPNsense\Firewall\Plugin $fw)
                         'direction' => 'in',
                         'interface' => $rule['interface'],
                         'descr' => $description,
-                        'quick' => true,
-                        'log' => false,
                         '#ref' => 'approuter:' . $rule['uuid'] . ':custom',
-                    ]
+                    ],
+                    $filterDefaults
                 );
                 $priority++;
             } else {
@@ -214,10 +220,9 @@ function approuter_firewall(\OPNsense\Firewall\Plugin $fw)
                         'direction' => 'in',
                         'interface' => $rule['interface'],
                         'descr' => $description,
-                        'quick' => true,
-                        'log' => false,
                         '#ref' => 'approuter:' . $rule['uuid'] . ':custom',
-                    ]
+                    ],
+                    $filterDefaults
                 );
                 $priority++;
             }
@@ -246,10 +251,9 @@ function approuter_firewall(\OPNsense\Firewall\Plugin $fw)
                             'direction' => 'in',
                             'interface' => $rule['interface'],
                             'descr' => $description,
-                            'quick' => true,
-                            'log' => false,
                             '#ref' => 'approuter:' . $rule['uuid'] . ':gw' . $i,
-                        ]
+                        ],
+                        $filterDefaults
                     );
                     $priority++;
                 }
@@ -264,10 +268,9 @@ function approuter_firewall(\OPNsense\Firewall\Plugin $fw)
                         'direction' => 'in',
                         'interface' => $rule['interface'],
                         'descr' => $description,
-                        'quick' => true,
-                        'log' => false,
                         '#ref' => 'approuter:' . $rule['uuid'],
-                    ]
+                    ],
+                    $filterDefaults
                 );
                 $priority++;
             } else {
@@ -282,10 +285,9 @@ function approuter_firewall(\OPNsense\Firewall\Plugin $fw)
                         'direction' => 'in',
                         'interface' => $rule['interface'],
                         'descr' => $description,
-                        'quick' => true,
-                        'log' => false,
                         '#ref' => 'approuter:' . $rule['uuid'],
-                    ]
+                    ],
+                    $filterDefaults
                 );
                 $priority++;
             }

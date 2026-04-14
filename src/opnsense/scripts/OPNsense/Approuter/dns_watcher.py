@@ -74,7 +74,12 @@ def detect_unbound_port():
 
 
 def detect_lan_interfaces():
-    """Find LAN interface names from Unbound's listening IPs."""
+    """Find LAN and WG interface names for DNS sniffing.
+
+    Detects LAN interfaces from Unbound's listening IPs, plus any
+    WireGuard interfaces (wg*) so that DNS queries from VPN clients
+    are also captured for pf table population.
+    """
     # Read Unbound's interface IPs (skip loopback and link-local)
     listen_ips = set()
     try:
@@ -93,8 +98,9 @@ def detect_lan_interfaces():
     if not listen_ips:
         return []
 
-    # Map IPs to interface names via ifconfig
+    # Map IPs to interface names via ifconfig, also collect WG interfaces
     iface_map = {}
+    wg_interfaces = []
     try:
         result = subprocess.run(
             ["/sbin/ifconfig", "-a"],
@@ -105,6 +111,9 @@ def detect_lan_interfaces():
             # Interface line: "igc2: flags=..."
             if not line.startswith("\t") and not line.startswith(" "):
                 current_iface = line.split(":")[0]
+                # Collect WireGuard interfaces for VPN client DNS sniffing
+                if current_iface.startswith("wg"):
+                    wg_interfaces.append(current_iface)
             elif current_iface and "inet " in line:
                 parts = line.strip().split()
                 if len(parts) >= 2:
@@ -115,8 +124,12 @@ def detect_lan_interfaces():
         pass
 
     interfaces = list(set(iface_map.values()))
+    # Add WG interfaces that aren't already detected via Unbound listen IPs
+    for wg in wg_interfaces:
+        if wg not in interfaces:
+            interfaces.append(wg)
     if interfaces:
-        log(f"Detected LAN interfaces: {interfaces} (IPs: {iface_map})")
+        log(f"Detected sniff interfaces: {interfaces} (LAN IPs: {iface_map}, WG: {wg_interfaces})")
     return interfaces
 
 
