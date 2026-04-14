@@ -17,7 +17,7 @@ install: install-plugin activate
 	@echo ""
 	@echo "========================================="
 	@echo " $(PLUGIN_NAME) $(PLUGIN_VERSION) installed"
-	@echo " Navigate to Firewall > AppRouter in the web UI"
+	@echo " Navigate to Services > AppRouter in the web UI"
 	@echo "========================================="
 
 install-plugin:
