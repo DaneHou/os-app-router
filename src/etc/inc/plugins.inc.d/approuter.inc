@@ -430,39 +430,25 @@ function approuter_cron()
     if ((string)$mdl->general->enabled === '1') {
         $interval = (string)$mdl->general->updateInterval ?: 'daily';
 
+        $cmd = '/usr/local/opnsense/scripts/OPNsense/Approuter/list_updater.py update';
+
         switch ($interval) {
             case 'hourly':
                 $jobs[] = [
                     'description' => 'AppRouter list update',
-                    'autocron' => [
-                        'minutes' => '15',
-                        'hours' => '*',
-                    ],
-                    'origin' => 'approuter',
-                    'command' => '/usr/local/opnsense/scripts/OPNsense/Approuter/list_updater.py update',
+                    'autocron' => [$cmd, '15'],
                 ];
                 break;
             case 'weekly':
                 $jobs[] = [
                     'description' => 'AppRouter list update',
-                    'autocron' => [
-                        'minutes' => '30',
-                        'hours' => '3',
-                        'days' => '1',
-                    ],
-                    'origin' => 'approuter',
-                    'command' => '/usr/local/opnsense/scripts/OPNsense/Approuter/list_updater.py update',
+                    'autocron' => [$cmd, '30', '3', '*', '*', '1'],
                 ];
                 break;
             default:
                 $jobs[] = [
                     'description' => 'AppRouter list update',
-                    'autocron' => [
-                        'minutes' => '30',
-                        'hours' => '3',
-                    ],
-                    'origin' => 'approuter',
-                    'command' => '/usr/local/opnsense/scripts/OPNsense/Approuter/list_updater.py update',
+                    'autocron' => [$cmd, '30', '3'],
                 ];
                 break;
         }
