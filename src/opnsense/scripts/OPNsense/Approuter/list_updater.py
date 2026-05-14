@@ -37,6 +37,9 @@ STATE_FILE = os.path.join(BASE_DIR, "state.json")
 
 V2FLY_BASE_URL = "https://raw.githubusercontent.com/v2fly/domain-list-community/master/data"
 
+# Valid domain pattern: optional wildcard prefix, then RFC-1123 labels
+_DOMAIN_RE = re.compile(r'^(\*\.)?[a-zA-Z0-9]([a-zA-Z0-9\-\.]*[a-zA-Z0-9])?$')
+
 DEFAULT_SOURCES = {
     "china_domains": {
         "url": "https://raw.githubusercontent.com/felixonmars/dnsmasq-china-list/master/accelerated-domains.china.conf",
@@ -383,14 +386,18 @@ def process_custom_categories(config, table_prefix="approuter"):
         if not slug:
             continue
 
-        # Normalise domains: split on comma or newline, strip whitespace
+        # Normalise domains: split on comma or newline, strip whitespace, validate
         raw_domains = cat.get("domains", "")
-        domains = sorted({
+        raw_list = [
             d.strip().lower()
             for part in raw_domains.replace("\n", ",").split(",")
             for d in [part.strip()]
             if d
-        })
+        ]
+        invalid = [d for d in raw_list if not _DOMAIN_RE.match(d)]
+        if invalid:
+            log(f"Skipping invalid domains in '{slug}': {', '.join(invalid)}", syslog.LOG_WARNING)
+        domains = sorted({d for d in raw_list if _DOMAIN_RE.match(d)})
 
         # Normalise CIDRs
         raw_cidrs = cat.get("cidrs", "")
