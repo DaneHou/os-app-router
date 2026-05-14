@@ -185,6 +185,35 @@ class SettingsController extends ApiMutableModelControllerBase
         return $this->toggleBase('rules.rule', $uuid, $enabled);
     }
 
+    public function searchCustomCategoryAction()
+    {
+        return $this->searchBase(
+            'customCategories.category',
+            ['slug', 'label', 'domains', 'cidrs'],
+            'label'
+        );
+    }
+
+    public function getCustomCategoryAction($uuid = null)
+    {
+        return $this->getBase('category', 'customCategories.category', $uuid);
+    }
+
+    public function addCustomCategoryAction()
+    {
+        return $this->addBase('category', 'customCategories.category');
+    }
+
+    public function setCustomCategoryAction($uuid)
+    {
+        return $this->setBase('category', 'customCategories.category', $uuid);
+    }
+
+    public function delCustomCategoryAction($uuid)
+    {
+        return $this->delBase('customCategories.category', $uuid);
+    }
+
     public function getCategoriesAction()
     {
         $result = ['rows' => []];
@@ -207,6 +236,18 @@ class SettingsController extends ApiMutableModelControllerBase
                         }
                     }
                 }
+            }
+        }
+        // Append user-defined custom categories
+        $mdl = $this->getModel();
+        foreach ($mdl->customCategories->category->iterateItems() as $uuid => $cat) {
+            $slug = (string)$cat->slug;
+            $label = (string)$cat->label;
+            if (!empty($slug) && !empty($label)) {
+                $result['rows'][] = [
+                    'value' => $slug,
+                    'label' => $label . ' [Custom]',
+                ];
             }
         }
         return $result;

@@ -68,3 +68,17 @@
 {"level":"info","message":"Hostname: AiServer","timestamp":"2026-05-02T07:59:56.057Z"}
 {"level":"info","message":"Username: dianxun","timestamp":"2026-05-02T07:59:56.057Z"}
 {"level":"info","message":"MCP Shell Server ready","timestamp":"2026-05-02T07:59:56.057Z"}
+{"level":"info","message":"MCP Shell Server started","timestamp":"2026-05-03T04:34:38.403Z"}
+{"level":"info","message":"Shell: /bin/bash","timestamp":"2026-05-03T04:34:38.403Z"}
+{"level":"info","message":"Working Directory: /home/dianxun","timestamp":"2026-05-03T04:34:38.403Z"}
+{"level":"info","message":"Platform: linux","timestamp":"2026-05-03T04:34:38.403Z"}
+{"level":"info","message":"Hostname: AiServer","timestamp":"2026-05-03T04:34:38.403Z"}
+{"level":"info","message":"Username: dianxun","timestamp":"2026-05-03T04:34:38.404Z"}
+{"level":"info","message":"MCP Shell Server ready","timestamp":"2026-05-03T04:34:38.404Z"}
+{"level":"info","message":"MCP Shell Server started","timestamp":"2026-05-14T14:38:45.969Z"}
+{"level":"info","message":"Shell: /bin/bash","timestamp":"2026-05-14T14:38:45.969Z"}
+{"level":"info","message":"Working Directory: /home/dianxun","timestamp":"2026-05-14T14:38:45.969Z"}
+{"level":"info","message":"Platform: linux","timestamp":"2026-05-14T14:38:45.969Z"}
+{"level":"info","message":"Hostname: AiServer","timestamp":"2026-05-14T14:38:45.969Z"}
+{"level":"info","message":"Username: dianxun","timestamp":"2026-05-14T14:38:45.970Z"}
+{"level":"info","message":"MCP Shell Server ready","timestamp":"2026-05-14T14:38:45.970Z"}

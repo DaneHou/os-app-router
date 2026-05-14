@@ -223,6 +223,110 @@
             buildGwPriority();
         }
 
+        // ── Custom Categories ────────────────────────────────────────────
+        var _editCatUuid = null;
+
+        function loadCustomCategories() {
+            ajaxGet("/api/approuter/settings/searchCustomCategory", {}, function(data) {
+                var $tbody = $("#custom-cat-tbody");
+                $tbody.empty();
+                if (data && data.rows && data.rows.length) {
+                    data.rows.forEach(function(row) {
+                        var domParts = (row.domains || "").split(",").filter(Boolean);
+                        var domPreview = domParts.slice(0, 3).map(function(d){return d.trim();}).join(", ");
+                        if (domParts.length > 3) domPreview += " …+" + (domParts.length - 3);
+                        var cidrParts = (row.cidrs || "").split(",").filter(Boolean);
+                        var cidrPreview = cidrParts.slice(0, 2).map(function(c){return c.trim();}).join(", ");
+                        if (cidrParts.length > 2) cidrPreview += " …+" + (cidrParts.length - 2);
+                        var $tr = $("<tr>")
+                            .append($("<td>").text(row.slug || ""))
+                            .append($("<td>").text(row.label || ""))
+                            .append($("<td>").text(domPreview))
+                            .append($("<td>").text(cidrPreview))
+                            .append($("<td>").html(
+                                '<button class="btn btn-xs btn-default btn-edit-cat" data-uuid="' + row.uuid + '" title="{{ lang._("Edit") }}"><i class="fa fa-pencil"></i></button> ' +
+                                '<button class="btn btn-xs btn-danger btn-del-cat" data-uuid="' + row.uuid + '" data-slug="' + (row.slug||"") + '" title="{{ lang._("Delete") }}"><i class="fa fa-trash-o"></i></button>'
+                            ));
+                        $tbody.append($tr);
+                    });
+                } else {
+                    $tbody.append('<tr><td colspan="5" class="text-center text-muted">{{ lang._("No custom categories defined yet.") }}</td></tr>');
+                }
+            });
+        }
+
+        function openCatDialog(uuid) {
+            _editCatUuid = uuid || null;
+            $("#customcat_uuid").val("");
+            $("#customcat_slug").val("").prop("disabled", false);
+            $("#customcat_label").val("");
+            $("#customcat_domains").val("");
+            $("#customcat_cidrs").val("");
+            $("#DialogCustomCategory .modal-title").text(uuid ? "{{ lang._('Edit Custom Category') }}" : "{{ lang._('Add Custom Category') }}");
+
+            if (uuid) {
+                ajaxGet("/api/approuter/settings/getCustomCategory/" + uuid, {}, function(data) {
+                    if (data && data.category) {
+                        var c = data.category;
+                        $("#customcat_uuid").val(uuid);
+                        $("#customcat_slug").val(c.slug || "").prop("disabled", true);
+                        $("#customcat_label").val(c.label || "");
+                        // Convert comma-separated to one-per-line for textarea
+                        $("#customcat_domains").val((c.domains || "").split(",").map(function(d){return d.trim();}).filter(Boolean).join("\n"));
+                        $("#customcat_cidrs").val((c.cidrs || "").split(",").map(function(d){return d.trim();}).filter(Boolean).join("\n"));
+                    }
+                });
+            }
+            $("#DialogCustomCategory").modal("show");
+        }
+
+        $("#addCustomCatBtn").click(function() { openCatDialog(null); });
+
+        $(document).on("click", ".btn-edit-cat", function() {
+            openCatDialog($(this).data("uuid"));
+        });
+
+        $(document).on("click", ".btn-del-cat", function() {
+            var uuid = $(this).data("uuid");
+            var slug = $(this).data("slug");
+            if (!confirm('{{ lang._("Delete custom category") }} "' + slug + '"?')) return;
+            ajaxCall("/api/approuter/settings/delCustomCategory/" + uuid, {}, function(data) {
+                loadCustomCategories();
+                $("#CustomCatChangeMessage").removeClass("hidden");
+            });
+        });
+
+        $("#saveCustomCategoryAct").click(function() {
+            var uuid = $("#customcat_uuid").val();
+            // Normalise textarea values: newlines → comma-separated
+            var domains = $("#customcat_domains").val().replace(/\s*[\r\n]+\s*/g, ",").replace(/,+/g, ",").replace(/^,|,$/g, "");
+            var cidrs   = $("#customcat_cidrs").val().replace(/\s*[\r\n]+\s*/g, ",").replace(/,+/g, ",").replace(/^,|,$/g, "");
+            var payload = {
+                category: {
+                    slug:    $("#customcat_slug").val().trim(),
+                    label:   $("#customcat_label").val().trim(),
+                    domains: domains,
+                    cidrs:   cidrs
+                }
+            };
+            var url = uuid
+                ? "/api/approuter/settings/setCustomCategory/" + uuid
+                : "/api/approuter/settings/addCustomCategory";
+            ajaxCall(url, payload, function(data) {
+                if (data && data.result && data.result !== "failed") {
+                    $("#DialogCustomCategory").modal("hide");
+                    loadCustomCategories();
+                    $("#CustomCatChangeMessage").removeClass("hidden");
+                } else {
+                    var msg = (data && data.validations) ? JSON.stringify(data.validations) : "{{ lang._('Save failed — check field values.') }}";
+                    alert(msg);
+                }
+            });
+        });
+
+        loadCustomCategories();
+        // ── End Custom Categories ─────────────────────────────────────────
+
         $("#grid-rules").UIBootgrid({
             'search':'/api/approuter/settings/searchRule',
             'get':'/api/approuter/settings/getRule/',
@@ -384,6 +488,7 @@
 <ul class="nav nav-tabs" data-tabs="tabs" id="maintabs">
     <li class="active"><a data-toggle="tab" href="#general">{{ lang._('General') }}</a></li>
     <li><a data-toggle="tab" href="#rules">{{ lang._('Routing Rules') }}</a></li>
+    <li><a data-toggle="tab" href="#categories">{{ lang._('Custom Categories') }}</a></li>
     <li><a data-toggle="tab" href="#lists">{{ lang._('List Sources') }}</a></li>
     <li><a data-toggle="tab" href="#status">{{ lang._('Status') }}</a></li>
 </ul>
@@ -444,6 +549,39 @@
         </div>
     </div>
 
+    <div id="categories" class="tab-pane fade in">
+        <div class="content-box" style="padding-bottom: 1.5em;">
+            <div class="col-md-12" style="padding-top: 1em;">
+                <p class="text-muted">
+                    {{ lang._('Define your own routing categories with custom domains and CIDRs. Each category appears in the Routing Rules editor alongside built-in categories.') }}
+                    {{ lang._('Domains match all subdomains automatically (e.g. "amazonaws-us-gov.com" catches s3.us-gov-west-1.amazonaws-us-gov.com).') }}
+                </p>
+            </div>
+            <table class="table table-condensed table-hover table-striped">
+                <thead>
+                    <tr>
+                        <th style="width:140px">{{ lang._('Slug (ID)') }}</th>
+                        <th>{{ lang._('Label') }}</th>
+                        <th>{{ lang._('Domains') }}</th>
+                        <th style="width:180px">{{ lang._('Static CIDRs') }}</th>
+                        <th style="width:80px">{{ lang._('Actions') }}</th>
+                    </tr>
+                </thead>
+                <tbody id="custom-cat-tbody">
+                </tbody>
+            </table>
+            <div class="col-md-12">
+                <div id="CustomCatChangeMessage" class="alert alert-info hidden" role="alert">
+                    {{ lang._('Category saved. Click Apply on the Routing Rules tab to activate changes.') }}
+                </div>
+                <hr />
+                <button class="btn btn-primary" id="addCustomCatBtn" type="button">
+                    <i class="fa fa-plus"></i> {{ lang._('Add Category') }}
+                </button>
+            </div>
+        </div>
+    </div>
+
     <div id="lists" class="tab-pane fade in">
         <div class="content-box" style="padding-bottom: 1.5em;">
             {{ partial("layout_partials/base_form",['fields':listsForm,'id':'frm_ListSettings'])}}
@@ -473,6 +611,46 @@
                 <button class="btn btn-default" id="refreshStatusAct" type="button">
                     <b>{{ lang._('Refresh') }}</b> <i class="fa fa-refresh"></i>
                 </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Custom Category Dialog -->
+<div class="modal fade" id="DialogCustomCategory" tabindex="-1" role="dialog">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <button type="button" class="close" data-dismiss="modal"><span>&times;</span></button>
+                <h4 class="modal-title">{{ lang._('Add Custom Category') }}</h4>
+            </div>
+            <div class="modal-body">
+                <input type="hidden" id="customcat_uuid">
+                <div class="form-group">
+                    <label>{{ lang._('Slug') }} <span class="text-danger">*</span></label>
+                    <input type="text" id="customcat_slug" class="form-control" placeholder="e.g. ba_work">
+                    <span class="help-block">{{ lang._('Lowercase letters, numbers, underscores. Used as pf table suffix. Cannot be changed after creation.') }}</span>
+                </div>
+                <div class="form-group">
+                    <label>{{ lang._('Label') }} <span class="text-danger">*</span></label>
+                    <input type="text" id="customcat_label" class="form-control" placeholder="e.g. BA Work Traffic">
+                </div>
+                <div class="form-group">
+                    <label>{{ lang._('Domains') }}</label>
+                    <textarea id="customcat_domains" class="form-control" rows="7"
+                        placeholder="One per line — subdomains matched automatically&#10;e.g.&#10;amazonaws-us-gov.com&#10;benchmarkanalytics.atlassian.net&#10;benchmarkonline.app"></textarea>
+                    <span class="help-block">{{ lang._('Do not prefix with *.  All subdomains are caught automatically.') }}</span>
+                </div>
+                <div class="form-group">
+                    <label>{{ lang._('Static CIDRs') }}</label>
+                    <textarea id="customcat_cidrs" class="form-control" rows="4"
+                        placeholder="One per line&#10;e.g.&#10;203.0.113.0/24&#10;198.51.100.5"></textarea>
+                    <span class="help-block">{{ lang._('Optional fixed IP/subnet entries added to the pf table immediately (no DNS needed).') }}</span>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-default" data-dismiss="modal">{{ lang._('Cancel') }}</button>
+                <button type="button" class="btn btn-primary" id="saveCustomCategoryAct">{{ lang._('Save') }}</button>
             </div>
         </div>
     </div>
