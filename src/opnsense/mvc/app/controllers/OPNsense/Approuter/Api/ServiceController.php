@@ -92,6 +92,12 @@ class ServiceController extends ApiMutableServiceControllerBase
                 $backend->configdRun('approuter geo_prober_start');
             }
 
+            // Reload dns_watcher domain mappings now that pf tables are registered.
+            // dns_watcher started earlier (before filter reload), so its initial
+            // resolution ran before the tables existed. SIGHUP triggers a fresh
+            // load_domain_mappings + resolve_and_update with tables now in place.
+            $backend->configdRun('approuter dns_watcher_reload');
+
             $status = "ok";
         }
         return ['status' => $status];

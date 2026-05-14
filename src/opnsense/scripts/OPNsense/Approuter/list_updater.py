@@ -8,6 +8,7 @@ Runs via configd cron to keep routing data up to date.
 import json
 import os
 import re
+import signal
 import socket
 import sys
 import subprocess
@@ -560,6 +561,20 @@ def update_remote_lists(config, state):
     return updated
 
 
+def signal_dns_watcher():
+    """Send SIGHUP to dns_watcher so it reloads domain mappings and re-resolves."""
+    pid_file = "/var/run/approuter_dns_watcher.pid"
+    if not os.path.exists(pid_file):
+        return
+    try:
+        with open(pid_file) as f:
+            pid = int(f.read().strip())
+        os.kill(pid, signal.SIGHUP)
+        log(f"Sent SIGHUP to dns_watcher (PID {pid}) — reloading domain mappings")
+    except (ValueError, ProcessLookupError, PermissionError) as e:
+        log(f"Could not signal dns_watcher: {e}", syslog.LOG_WARNING)
+
+
 def update_tables():
     script = "/usr/local/opnsense/scripts/OPNsense/Approuter/table_manager.sh"
     if os.path.exists(script):
@@ -570,6 +585,7 @@ def update_tables():
             log(f"Table reload failed: {e}", syslog.LOG_ERR)
         except subprocess.TimeoutExpired:
             log("Table reload timed out", syslog.LOG_ERR)
+    signal_dns_watcher()
 
 
 def main():
@@ -609,6 +625,7 @@ def main():
         generate_dnsmasq_custom_conf(config)
         generate_unbound_conf(categories, config=config)
         process_custom_categories(config)
+        signal_dns_watcher()
         log("DNS configs regenerated")
 
     elif action == "status":
