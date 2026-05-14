@@ -372,6 +372,75 @@ def generate_custom_domain_mappings(config, table_prefix="approuter"):
         log(f"Generated {custom_count} custom domain mapping files")
 
 
+def process_custom_categories(config, table_prefix="approuter"):
+    """Generate dnsmasq/unbound configs and cidr files for user-defined custom categories."""
+    custom_cats = config.get("custom_categories", [])
+    valid_slugs = set()
+
+    for cat in custom_cats:
+        slug = cat.get("slug", "").strip()
+        if not slug:
+            continue
+
+        # Normalise domains: split on comma or newline, strip whitespace
+        raw_domains = cat.get("domains", "")
+        domains = sorted({
+            d.strip().lower()
+            for part in raw_domains.replace("\n", ",").split(",")
+            for d in [part.strip()]
+            if d
+        })
+
+        # Normalise CIDRs
+        raw_cidrs = cat.get("cidrs", "")
+        cidrs = set()
+        for part in raw_cidrs.replace("\n", ",").split(","):
+            cidr = part.strip()
+            if not cidr:
+                continue
+            try:
+                cidrs.add(str(ipaddress.ip_network(cidr, strict=False)))
+            except ValueError:
+                log(f"Invalid CIDR in custom category '{slug}': {cidr}", syslog.LOG_WARNING)
+
+        table_name = f"{table_prefix}_{slug}"
+        valid_slugs.add(slug)
+
+        # Write cidr file (always write, even if empty, so pf table is registered)
+        aggregated = aggregate_cidrs(cidrs) if cidrs else []
+        cidr_path = os.path.join(CIDRS_DIR, f"{slug}.txt")
+        write_if_changed(cidr_path, "\n".join(aggregated) + "\n" if aggregated else "")
+
+        # Dnsmasq config
+        if domains:
+            lines = [f"# AppRouter custom category: {cat.get('label', slug)}",
+                     "# Auto-generated - do not edit"]
+            for domain in domains:
+                lines.append(f"ipset=/{domain}/{table_name}")
+            dnsmasq_path = os.path.join(DNSMASQ_DIR, f"approuter_usercat_{slug}.conf")
+            write_if_changed(dnsmasq_path, "\n".join(lines) + "\n")
+
+        # Unbound JSON mapping
+        mapping = {"table": table_name, "domains": domains}
+        unbound_path = os.path.join(UNBOUND_DIR, f"approuter_usercat_{slug}.json")
+        write_if_changed(unbound_path, json.dumps(mapping, indent=2) + "\n")
+
+    # Clean orphaned usercat files for deleted categories
+    for f in Path(DNSMASQ_DIR).glob("approuter_usercat_*.conf"):
+        slug = f.stem.replace("approuter_usercat_", "")
+        if slug not in valid_slugs:
+            f.unlink()
+            log(f"Removed orphaned dnsmasq file: {f.name}")
+    for f in Path(UNBOUND_DIR).glob("approuter_usercat_*.json"):
+        slug = f.stem.replace("approuter_usercat_", "")
+        if slug not in valid_slugs:
+            f.unlink()
+            log(f"Removed orphaned unbound file: {f.name}")
+
+    if valid_slugs:
+        log(f"Processed {len(valid_slugs)} custom categories: {', '.join(sorted(valid_slugs))}")
+
+
 def generate_dnsmasq_custom_conf(config, table_prefix="approuter"):
     """Generate Dnsmasq ipset config for per-rule custom domains."""
     rules = config.get("rules", [])
@@ -528,6 +597,7 @@ def main():
         generate_dnsmasq_conf(categories, v2fly_merged=v2fly_merged)
         generate_dnsmasq_custom_conf(config)
         generate_unbound_conf(categories, v2fly_merged=v2fly_merged, config=config)
+        process_custom_categories(config)
         state["last_full_update"] = int(time.time())
         save_state(state)
         if updated or v2fly_merged:
@@ -538,6 +608,7 @@ def main():
         generate_dnsmasq_conf(categories)
         generate_dnsmasq_custom_conf(config)
         generate_unbound_conf(categories, config=config)
+        process_custom_categories(config)
         log("DNS configs regenerated")
 
     elif action == "status":
@@ -563,6 +634,7 @@ def main():
         generate_dnsmasq_conf(categories, v2fly_merged=v2fly_merged)
         generate_dnsmasq_custom_conf(config)
         generate_unbound_conf(categories, v2fly_merged=v2fly_merged, config=config)
+        process_custom_categories(config)
         state["last_full_update"] = int(time.time())
         save_state(state)
         update_tables()

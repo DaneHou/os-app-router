@@ -100,6 +100,24 @@
                 </interface>
             </rule>
         </rules>
+        <customCategories>
+            <category type="ArrayField">
+                <slug type="TextField">
+                    <Required>Y</Required>
+                    <Mask>/^[a-z][a-z0-9_]{0,30}$/</Mask>
+                    <ValidationMessage>Lowercase letters, numbers, underscores only (must start with a letter)</ValidationMessage>
+                </slug>
+                <label type="TextField">
+                    <Required>Y</Required>
+                </label>
+                <domains type="TextField">
+                    <Required>N</Required>
+                </domains>
+                <cidrs type="TextField">
+                    <Required>N</Required>
+                </cidrs>
+            </category>
+        </customCategories>
         <lists>
             <chinaDomainUrl type="UrlField">
                 <Default>https://raw.githubusercontent.com/felixonmars/dnsmasq-china-list/master/accelerated-domains.china.conf</Default>
