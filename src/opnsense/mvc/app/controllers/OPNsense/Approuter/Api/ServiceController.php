@@ -76,8 +76,30 @@ class ServiceController extends ApiMutableServiceControllerBase
                 $backend->configdpRun('approuter update_lists');
             }
 
-            // Start geo_prober if any smart gateway rules exist
+            // Load custom category CIDR files into pf tables.
+            // pf persist tables retain their contents across ruleset reloads —
+            // the 'file' directive in registerTable only initialises the table on
+            // first creation.  Explicitly replace so that added/removed CIDRs take
+            // effect without requiring a full service restart.
             $mdl = new Approuter();
+            $tablePrefix = (string)$mdl->general->tablePrefix ?: 'approuter';
+            $cidrsDir = '/usr/local/etc/app-router/cidrs';
+            foreach ($mdl->customCategories->category->iterateItems() as $uuid => $cat) {
+                $slug = (string)$cat->slug;
+                if (empty($slug)) {
+                    continue;
+                }
+                $cidrFile = $cidrsDir . '/' . $slug . '.txt';
+                $pfTable = $tablePrefix . '_' . $slug;
+                if (file_exists($cidrFile) && filesize($cidrFile) > 0) {
+                    exec("/sbin/pfctl -t " . escapeshellarg($pfTable) . " -T replace -f " . escapeshellarg($cidrFile) . " 2>/dev/null");
+                } else {
+                    // Empty or missing file — flush static entries so removed CIDRs don't linger
+                    exec("/sbin/pfctl -t " . escapeshellarg($pfTable) . " -T flush 2>/dev/null");
+                }
+            }
+
+            // Start geo_prober if any smart gateway rules exist
             $hasSmartRules = false;
             foreach ($mdl->rules->rule->iterateItems() as $uuid => $rule) {
                 if ((string)$rule->enabled === '1' && (string)$rule->smartGateway === '1') {
