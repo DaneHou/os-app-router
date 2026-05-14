@@ -67,7 +67,12 @@ class ServiceController extends ApiMutableServiceControllerBase
             if (is_dir($clientsDir)) {
                 foreach (glob($clientsDir . '/*.txt') as $clientFile) {
                     $tableName = basename($clientFile, '.txt');
-                    exec("/sbin/pfctl -t " . escapeshellarg($tableName) . " -T replace -f " . escapeshellarg($clientFile));
+                    $pfOut = [];
+                    $pfRet = 0;
+                    exec("/sbin/pfctl -t " . escapeshellarg($tableName) . " -T replace -f " . escapeshellarg($clientFile) . " 2>&1", $pfOut, $pfRet);
+                    if ($pfRet !== 0) {
+                        syslog(LOG_ERR, "approuter: pfctl replace failed for {$tableName}: " . implode(' ', $pfOut));
+                    }
                 }
             }
 
@@ -92,7 +97,12 @@ class ServiceController extends ApiMutableServiceControllerBase
                 $cidrFile = $cidrsDir . '/' . $slug . '.txt';
                 $pfTable = $tablePrefix . '_' . $slug;
                 if (file_exists($cidrFile) && filesize($cidrFile) > 0) {
-                    exec("/sbin/pfctl -t " . escapeshellarg($pfTable) . " -T replace -f " . escapeshellarg($cidrFile) . " 2>/dev/null");
+                    $pfOut = [];
+                    $pfRet = 0;
+                    exec("/sbin/pfctl -t " . escapeshellarg($pfTable) . " -T replace -f " . escapeshellarg($cidrFile) . " 2>&1", $pfOut, $pfRet);
+                    if ($pfRet !== 0) {
+                        syslog(LOG_ERR, "approuter: pfctl replace failed for {$pfTable}: " . implode(' ', $pfOut));
+                    }
                 } else {
                     // Empty or missing file — flush static entries so removed CIDRs don't linger
                     exec("/sbin/pfctl -t " . escapeshellarg($pfTable) . " -T flush 2>/dev/null");

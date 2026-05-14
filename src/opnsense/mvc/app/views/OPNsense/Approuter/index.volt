@@ -165,7 +165,7 @@
                 var lbl = $('<span>').text(labelMap[v] || v).html();
                 var isFallback = (i === selected.length - 1);
                 var badge = isFallback ? '<span class="label label-default" style="margin-left:6px">fallback</span>' : '';
-                html += '<tr data-gw="' + v + '">';
+                html += '<tr data-gw="' + v.replace(/&/g, '&amp;').replace(/"/g, '&quot;') + '">';
                 html += '<td style="width:30px;font-weight:bold;color:#337ab7">' + (i+1) + '.</td>';
                 html += '<td>' + lbl + badge + '</td>';
                 html += '<td style="width:60px;text-align:right">';
@@ -348,6 +348,15 @@
             });
         });
 
+        $("#reconfigureAct2").click(function(){
+            $("#reconfigureAct2_progress").addClass("fa fa-spinner fa-pulse");
+            ajaxCall(url="/api/approuter/service/reconfigure", sendData={}, callback=function(data,status) {
+                $("#reconfigureAct2_progress").removeClass("fa fa-spinner fa-pulse");
+                $("#CustomCatChangeMessage").addClass("hidden");
+                updateServiceControlUI('approuter');
+            });
+        });
+
         // Service status control (green/red indicator + stop/restart buttons)
         updateServiceControlUI('approuter');
 
@@ -462,7 +471,7 @@
                             var pktBadge = rs.packets > 0 ?
                                 '<span class="label label-success">' + rs.packets.toLocaleString() + '</span>' :
                                 '<span class="label label-default">0</span>';
-                            html += '<tr><td>' + rs.rule.replace(/</g, '&lt;').replace(/>/g, '&gt;') + '</td><td>' + pktBadge + '</td><td>' + bytesStr + '</td></tr>';
+                            html += '<tr><td>' + esc(rs.rule) + '</td><td>' + pktBadge + '</td><td>' + bytesStr + '</td></tr>';
                         }
                         html += '</table>';
                     }
@@ -472,7 +481,7 @@
                         html += '<h4>{{ lang._("Recent Logs") }}</h4>';
                         html += '<pre style="max-height:300px;overflow-y:auto;font-size:11px">';
                         for (var i = info.recent_logs.length - 1; i >= 0; i--) {
-                            html += info.recent_logs[i].replace(/</g, '&lt;').replace(/>/g, '&gt;') + '\n';
+                            html += esc(info.recent_logs[i]) + '\n';
                         }
                         html += '</pre>';
                     }
@@ -510,6 +519,7 @@
     </div>
 
     <div id="rules" class="tab-pane fade in">
+        <div class="content-box" style="padding-bottom: 1.5em;">
         <table id="grid-rules" class="table table-condensed table-hover table-striped" data-editDialog="DialogRule" data-editAlert="RuleChangeMessage">
             <thead>
                 <tr>
@@ -550,6 +560,7 @@
                 <b>{{ lang._('Apply') }}</b> <i id="reconfigureAct_progress"></i>
             </button>
         </div>
+        </div>
     </div>
 
     <div id="categories" class="tab-pane fade in">
@@ -575,11 +586,14 @@
             </table>
             <div class="col-md-12">
                 <div id="CustomCatChangeMessage" class="alert alert-info hidden" role="alert">
-                    {{ lang._('Category saved. Click Apply on the Routing Rules tab to activate changes.') }}
+                    {{ lang._('Category saved. Click Apply to activate changes.') }}
                 </div>
                 <hr />
                 <button class="btn btn-primary" id="addCustomCatBtn" type="button">
                     <i class="fa fa-plus"></i> {{ lang._('Add Category') }}
+                </button>
+                <button class="btn btn-default" id="reconfigureAct2" type="button">
+                    <b>{{ lang._('Apply') }}</b> <i id="reconfigureAct2_progress"></i>
                 </button>
             </div>
         </div>
