@@ -258,7 +258,6 @@ def process_sniffed_dns(query_domain, answer_ips):
             addr = ipaddress.ip_address(ip)
             if addr.version == 4 and not addr.is_private:
                 addrs.add(ip)
-                addrs.add(str(ipaddress.ip_network(f"{ip}/24", strict=False)))
         except ValueError:
             pass
 
@@ -385,7 +384,6 @@ def resolve_and_update():
                 ips = resolve_via_unbound(variant)
                 for ip in ips:
                     addrs.add(ip)
-                    addrs.add(str(ipaddress.ip_network(f"{ip}/24", strict=False)))
 
         added = add_to_table(table, addrs)
         if added > 0:
