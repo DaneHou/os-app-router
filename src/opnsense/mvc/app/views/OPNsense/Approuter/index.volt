@@ -298,7 +298,6 @@
 
         $("#saveCustomCategoryAct").click(function() {
             var uuid = $("#customcat_uuid").val();
-            // Normalise textarea values: newlines → comma-separated
             var domains = $("#customcat_domains").val().replace(/\s*[\r\n]+\s*/g, ",").replace(/,+/g, ",").replace(/^,|,$/g, "");
             var cidrs   = $("#customcat_cidrs").val().replace(/\s*[\r\n]+\s*/g, ",").replace(/,+/g, ",").replace(/^,|,$/g, "");
             var payload = {
@@ -312,14 +311,18 @@
             var url = uuid
                 ? "/api/approuter/settings/setCustomCategory/" + uuid
                 : "/api/approuter/settings/addCustomCategory";
+            $("#saveCustomCategoryAct_progress").addClass("fa fa-spinner fa-pulse");
             ajaxCall(url, payload, function(data) {
+                $("#saveCustomCategoryAct_progress").removeClass("fa fa-spinner fa-pulse");
                 if (data && data.result && data.result !== "failed") {
                     $("#DialogCustomCategory").modal("hide");
                     loadCustomCategories();
                     $("#CustomCatChangeMessage").removeClass("hidden");
                 } else {
-                    var msg = (data && data.validations) ? JSON.stringify(data.validations) : "{{ lang._('Save failed — check field values.') }}";
-                    alert(msg);
+                    var errs = (data && data.validations)
+                        ? $.map(data.validations, function(v, k){ return k + ": " + v; }).join("\n")
+                        : "{{ lang._('Save failed — check field values.') }}";
+                    alert(errs);
                 }
             });
         });
@@ -618,39 +621,81 @@
 
 <!-- Custom Category Dialog -->
 <div class="modal fade" id="DialogCustomCategory" tabindex="-1" role="dialog">
-    <div class="modal-dialog">
+    <div class="modal-dialog modal-lg">
         <div class="modal-content">
             <div class="modal-header">
                 <button type="button" class="close" data-dismiss="modal"><span>&times;</span></button>
-                <h4 class="modal-title">{{ lang._('Add Custom Category') }}</h4>
+                <h4 class="modal-title">{{ lang._('Edit Custom Category') }}</h4>
             </div>
             <div class="modal-body">
                 <input type="hidden" id="customcat_uuid">
-                <div class="form-group">
-                    <label>{{ lang._('Slug') }} <span class="text-danger">*</span></label>
-                    <input type="text" id="customcat_slug" class="form-control" placeholder="e.g. ba_work">
-                    <span class="help-block">{{ lang._('Lowercase letters, numbers, underscores. Used as pf table suffix. Cannot be changed after creation.') }}</span>
-                </div>
-                <div class="form-group">
-                    <label>{{ lang._('Label') }} <span class="text-danger">*</span></label>
-                    <input type="text" id="customcat_label" class="form-control" placeholder="e.g. BA Work Traffic">
-                </div>
-                <div class="form-group">
-                    <label>{{ lang._('Domains') }}</label>
-                    <textarea id="customcat_domains" class="form-control" rows="7"
-                        placeholder="One per line — subdomains matched automatically&#10;e.g.&#10;amazonaws-us-gov.com&#10;benchmarkanalytics.atlassian.net&#10;benchmarkonline.app"></textarea>
-                    <span class="help-block">{{ lang._('Do not prefix with *.  All subdomains are caught automatically.') }}</span>
-                </div>
-                <div class="form-group">
-                    <label>{{ lang._('Static CIDRs') }}</label>
-                    <textarea id="customcat_cidrs" class="form-control" rows="4"
-                        placeholder="One per line&#10;e.g.&#10;203.0.113.0/24&#10;198.51.100.5"></textarea>
-                    <span class="help-block">{{ lang._('Optional fixed IP/subnet entries added to the pf table immediately (no DNS needed).') }}</span>
-                </div>
+                <table class="table table-striped table-condensed">
+                    <colgroup>
+                        <col style="width: 22em">
+                        <col>
+                    </colgroup>
+                    <tbody>
+                        <tr id="row_customcat_slug">
+                            <td>
+                                <a id="help_for_customcat_slug" href="#" class="showhelp"><i class="fa fa-info-circle"></i></a>
+                                <b>{{ lang._('Slug') }}</b>
+                                <span class="text-danger">*</span>
+                            </td>
+                            <td>
+                                <input type="text" class="form-control" id="customcat_slug" placeholder="e.g. ba_work">
+                                <div class="hidden" data-for="help_for_customcat_slug">
+                                    <small>{{ lang._('Lowercase letters, numbers, underscores. Becomes the pf table suffix (approuter_SLUG). Cannot be changed after creation.') }}</small>
+                                </div>
+                            </td>
+                        </tr>
+                        <tr id="row_customcat_label">
+                            <td>
+                                <a id="help_for_customcat_label" href="#" class="showhelp"><i class="fa fa-info-circle"></i></a>
+                                <b>{{ lang._('Label') }}</b>
+                                <span class="text-danger">*</span>
+                            </td>
+                            <td>
+                                <input type="text" class="form-control" id="customcat_label" placeholder="e.g. BA Work Traffic">
+                                <div class="hidden" data-for="help_for_customcat_label">
+                                    <small>{{ lang._('Display name shown in the Routing Rules category selector.') }}</small>
+                                </div>
+                            </td>
+                        </tr>
+                        <tr id="row_customcat_domains">
+                            <td>
+                                <a id="help_for_customcat_domains" href="#" class="showhelp"><i class="fa fa-info-circle"></i></a>
+                                <b>{{ lang._('Domains') }}</b>
+                            </td>
+                            <td>
+                                <textarea class="form-control" id="customcat_domains" rows="8"
+                                    placeholder="One per line&#10;e.g.&#10;amazonaws-us-gov.com&#10;benchmarkanalytics.atlassian.net&#10;benchmarkonline.app"></textarea>
+                                <div class="hidden" data-for="help_for_customcat_domains">
+                                    <small>{{ lang._('One domain per line. All subdomains matched automatically — no need for *.') }}<br>
+                                    {{ lang._('e.g. "amazonaws-us-gov.com" catches s3.us-gov-west-1.amazonaws-us-gov.com and every other subdomain.') }}</small>
+                                </div>
+                            </td>
+                        </tr>
+                        <tr id="row_customcat_cidrs">
+                            <td>
+                                <a id="help_for_customcat_cidrs" href="#" class="showhelp"><i class="fa fa-info-circle"></i></a>
+                                <b>{{ lang._('Static CIDRs') }}</b>
+                            </td>
+                            <td>
+                                <textarea class="form-control" id="customcat_cidrs" rows="4"
+                                    placeholder="One per line&#10;e.g.&#10;203.0.113.0/24&#10;198.51.100.5"></textarea>
+                                <div class="hidden" data-for="help_for_customcat_cidrs">
+                                    <small>{{ lang._('Optional. Fixed IPs/subnets loaded into the pf table immediately (no DNS required).') }}</small>
+                                </div>
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
             </div>
             <div class="modal-footer">
                 <button type="button" class="btn btn-default" data-dismiss="modal">{{ lang._('Cancel') }}</button>
-                <button type="button" class="btn btn-primary" id="saveCustomCategoryAct">{{ lang._('Save') }}</button>
+                <button type="button" class="btn btn-primary" id="saveCustomCategoryAct">
+                    <b>{{ lang._('Save') }}</b> <i id="saveCustomCategoryAct_progress"></i>
+                </button>
             </div>
         </div>
     </div>
