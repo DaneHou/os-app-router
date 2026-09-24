@@ -11,7 +11,7 @@ PLUGIN_SERVICE=	$(DESTDIR)$(PREFIX)/opnsense/service
 PLUGIN_CONF=	$(DESTDIR)$(PREFIX)/etc/app-router
 PLUGIN_HOOK=	$(DESTDIR)$(PREFIX)/etc/inc/plugins.inc.d
 
-.PHONY: install install-plugin activate uninstall uninstall-all clean lint
+.PHONY: install install-plugin activate uninstall uninstall-all clean lint test
 
 install: install-plugin activate
 	@echo ""
@@ -55,6 +55,8 @@ install-plugin:
 		$(PLUGIN_MVC)/controllers/OPNsense/Approuter/forms/general.xml
 	@cp src/opnsense/mvc/app/controllers/OPNsense/Approuter/forms/lists.xml \
 		$(PLUGIN_MVC)/controllers/OPNsense/Approuter/forms/lists.xml
+	@cp src/opnsense/mvc/app/controllers/OPNsense/Approuter/forms/dialogRule.xml \
+		$(PLUGIN_MVC)/controllers/OPNsense/Approuter/forms/dialogRule.xml
 	@# MVC Views
 	@mkdir -p $(PLUGIN_MVC)/views/OPNsense/Approuter
 	@cp src/opnsense/mvc/app/views/OPNsense/Approuter/index.volt \
@@ -86,7 +88,6 @@ install-plugin:
 	@mkdir -p $(PLUGIN_CONF)/domains
 	@mkdir -p $(PLUGIN_CONF)/cidrs
 	@mkdir -p $(PLUGIN_CONF)/clients
-	@mkdir -p $(PLUGIN_CONF)/dnsmasq.d
 	@mkdir -p $(PLUGIN_CONF)/unbound.d
 	@# Runtime directories
 	@mkdir -p $(DESTDIR)/var/run/approuter
@@ -206,3 +207,6 @@ lint:
 	@echo ">>> Checking XML files..."
 	@find src -name '*.xml' -exec xmllint --noout {} \; 2>/dev/null || echo "(xmllint not available, skipping)"
 	@echo ">>> All checks passed."
+
+test: lint
+	@python3 -m pytest -q tests

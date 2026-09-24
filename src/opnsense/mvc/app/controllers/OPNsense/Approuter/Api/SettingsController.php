@@ -216,7 +216,13 @@ class SettingsController extends ApiMutableModelControllerBase
 
     public function getCategoriesAction()
     {
-        $result = ['rows' => []];
+        // IP based category: all mainland China networks from the China CIDR
+        // list (List Sources tab), loaded into <prefix>_china_all by
+        // list_updater. Matches destinations regardless of domain or DNS.
+        $result = ['rows' => [[
+            'value' => 'china_all',
+            'label' => gettext('China Mainland IPs (CIDR list)'),
+        ]]];
         $categoriesFile = '/usr/local/opnsense/scripts/OPNsense/Approuter/app_categories.json';
         if (file_exists($categoriesFile)) {
             $data = json_decode(file_get_contents($categoriesFile), true);
@@ -259,7 +265,7 @@ class SettingsController extends ApiMutableModelControllerBase
         $seen = [];
 
         // Primary: configd 'interface gateways status' — returns all gateways
-        // including dynamic/auto-created ones (e.g. FRP_GW from tunnel interfaces)
+        // including dynamic/auto-created ones (e.g. gateways of tunnel interfaces)
         try {
             $backend = new Backend();
             $response = trim($backend->configdRun('interface gateways status'));

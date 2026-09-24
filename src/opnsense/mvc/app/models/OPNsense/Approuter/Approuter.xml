@@ -8,6 +8,8 @@
                 <Default>0</Default>
                 <Required>Y</Required>
             </enabled>
+            <!-- Kept for config compatibility only: DNS answers are always
+                 learned by dns_watcher, independent of the resolver used. -->
             <dnsResolver type="OptionField">
                 <Default>dnsmasq</Default>
                 <OptionValues>
@@ -25,6 +27,13 @@
                 </OptionValues>
                 <Required>Y</Required>
             </updateInterval>
+            <ipExpireHours type="IntegerField">
+                <Default>24</Default>
+                <MinimumValue>0</MinimumValue>
+                <MaximumValue>720</MaximumValue>
+                <Required>Y</Required>
+                <ValidationMessage>Enter a value between 0 and 720 hours</ValidationMessage>
+            </ipExpireHours>
             <tablePrefix type="TextField">
                 <Default>approuter</Default>
                 <Required>Y</Required>
@@ -40,6 +49,8 @@
                 </enabled>
                 <description type="TextField">
                     <Required>N</Required>
+                    <Mask>/^[^\x00-\x1f\x7f]{0,255}$/u</Mask>
+                    <ValidationMessage>Description may not contain control characters (max 255 characters)</ValidationMessage>
                 </description>
                 <sourceNets type="CSVListField">
                     <Required>Y</Required>
@@ -56,7 +67,7 @@
                 <gateway type="CSVListField">
                     <Required>Y</Required>
                     <FieldSeparator>,</FieldSeparator>
-                    <Mask>/^[a-zA-Z0-9_,\s]+$/</Mask>
+                    <Mask>/^[a-zA-Z0-9_, ]+$/</Mask>
                     <ValidationMessage>Enter one or more gateway names separated by commas</ValidationMessage>
                 </gateway>
                 <smartGateway type="BooleanField">
@@ -65,6 +76,8 @@
                 </smartGateway>
                 <probeUrl type="TextField">
                     <Required>N</Required>
+                    <Mask>/^https?:\/\/[^\s"'\\]{1,2048}$/i</Mask>
+                    <ValidationMessage>Enter an http:// or https:// URL</ValidationMessage>
                 </probeUrl>
                 <probeInterval type="IntegerField">
                     <Default>300</Default>
@@ -85,6 +98,8 @@
                 </probeMethod>
                 <probePattern type="TextField">
                     <Required>N</Required>
+                    <Mask>/^[^\x00-\x1f\x7f]{0,512}$/u</Mask>
+                    <ValidationMessage>Pattern may not contain control characters (max 512 characters)</ValidationMessage>
                 </probePattern>
                 <customDomains type="TextField">
                     <Required>N</Required>
@@ -104,17 +119,23 @@
             <category type="ArrayField">
                 <slug type="TextField">
                     <Required>Y</Required>
-                    <Mask>/^[a-z][a-z0-9_]{0,30}$/</Mask>
-                    <ValidationMessage>Lowercase letters, numbers, underscores only (must start with a letter)</ValidationMessage>
+                    <Mask>/^(?!china_all$)[a-z][a-z0-9_]{0,30}$/</Mask>
+                    <ValidationMessage>Lowercase letters, numbers, underscores only (must start with a letter; "china_all" is reserved)</ValidationMessage>
                 </slug>
                 <label type="TextField">
                     <Required>Y</Required>
+                    <Mask>/^[^\x00-\x1f\x7f]{1,128}$/u</Mask>
+                    <ValidationMessage>Label may not contain control characters (max 128 characters)</ValidationMessage>
                 </label>
                 <domains type="TextField">
                     <Required>N</Required>
+                    <Mask>/^[a-z0-9_.,*\-\s]*$/i</Mask>
+                    <ValidationMessage>Domains may only contain letters, digits, dots, dashes and underscores</ValidationMessage>
                 </domains>
                 <cidrs type="TextField">
                     <Required>N</Required>
+                    <Mask>/^[0-9a-f:.\/,\s]*$/i</Mask>
+                    <ValidationMessage>Enter IP addresses or CIDR ranges</ValidationMessage>
                 </cidrs>
             </category>
         </customCategories>
@@ -129,9 +150,13 @@
             </chinaCidrUrl>
             <customDomains type="TextField">
                 <Required>N</Required>
+                <Mask>/^[a-z0-9_.,*\-\s]*$/i</Mask>
+                <ValidationMessage>Domains may only contain letters, digits, dots, dashes and underscores</ValidationMessage>
             </customDomains>
             <customCidrs type="TextField">
                 <Required>N</Required>
+                <Mask>/^[0-9a-f:.\/,\s]*$/i</Mask>
+                <ValidationMessage>Enter IP addresses or CIDR ranges</ValidationMessage>
             </customCidrs>
         </lists>
     </items>

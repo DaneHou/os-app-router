@@ -243,10 +243,15 @@
                             .append($("<td>").text(row.label || ""))
                             .append($("<td>").text(domPreview))
                             .append($("<td>").text(cidrPreview))
-                            .append($("<td>").html(
-                                '<button class="btn btn-xs btn-default btn-edit-cat" data-uuid="' + row.uuid + '" title="{{ lang._("Edit") }}"><i class="fa fa-pencil"></i></button> ' +
-                                '<button class="btn btn-xs btn-danger btn-del-cat" data-uuid="' + row.uuid + '" data-slug="' + (row.slug||"") + '" title="{{ lang._("Delete") }}"><i class="fa fa-trash-o"></i></button>'
-                            ));
+                            .append($("<td>")
+                                // build via .attr() so values are attribute-escaped
+                                .append($('<button class="btn btn-xs btn-default btn-edit-cat" title="{{ lang._("Edit") }}"><i class="fa fa-pencil"></i></button>')
+                                    .attr("data-uuid", row.uuid))
+                                .append(" ")
+                                .append($('<button class="btn btn-xs btn-danger btn-del-cat" title="{{ lang._("Delete") }}"><i class="fa fa-trash-o"></i></button>')
+                                    .attr("data-uuid", row.uuid)
+                                    .attr("data-slug", row.slug || ""))
+                            );
                         $tbody.append($tr);
                     });
                 } else {
@@ -374,16 +379,15 @@
                     html += '<table class="table table-condensed table-striped">';
                     html += '<tr><td style="width:200px">{{ lang._("Plugin Enabled") }}</td><td>' +
                         (info.enabled === '1' ? '<span class="label label-success">Yes</span>' : '<span class="label label-danger">No</span>') + '</td></tr>';
-                    html += '<tr><td>{{ lang._("DNS Resolver") }}</td><td>' + (info.dns_resolver || 'N/A') + '</td></tr>';
                     if (info.dns_watcher) {
                         var watcherLabel = info.dns_watcher.running ?
-                            '<span class="label label-success">Running (PID ' + info.dns_watcher.pid + ')</span>' :
+                            '<span class="label label-success">Running (PID ' + esc(info.dns_watcher.pid) + ')</span>' :
                             '<span class="label label-danger">Stopped</span>';
                         html += '<tr><td>{{ lang._("DNS Watcher") }}</td><td>' + watcherLabel + '</td></tr>';
                     }
                     if (info.geo_prober) {
                         var proberLabel = info.geo_prober.running ?
-                            '<span class="label label-success">Running (PID ' + info.geo_prober.pid + ')</span>' :
+                            '<span class="label label-success">Running (PID ' + esc(info.geo_prober.pid) + ')</span>' :
                             '<span class="label label-default">Stopped</span>';
                         html += '<tr><td>{{ lang._("Geo Prober") }}</td><td>' + proberLabel + '</td></tr>';
                     }
@@ -397,14 +401,14 @@
                     html += '<h4>{{ lang._("Lists") }}</h4>';
                     html += '<table class="table table-condensed table-striped">';
                     if (info.china_cidrs_count) {
-                        html += '<tr><td style="width:200px">{{ lang._("China CIDRs") }}</td><td>' + info.china_cidrs_count + '</td></tr>';
+                        html += '<tr><td style="width:200px">{{ lang._("China CIDRs") }}</td><td>' + esc(info.china_cidrs_count) + '</td></tr>';
                     }
                     if (info.china_domains_count) {
-                        html += '<tr><td>{{ lang._("China Domains") }}</td><td>' + info.china_domains_count + '</td></tr>';
+                        html += '<tr><td>{{ lang._("China Domains") }}</td><td>' + esc(info.china_domains_count) + '</td></tr>';
                     }
                     if (info.categories) {
                         for (var cat in info.categories) {
-                            html += '<tr><td>' + cat + '</td><td>' + info.categories[cat] + ' domains</td></tr>';
+                            html += '<tr><td>' + esc(cat) + '</td><td>' + esc(info.categories[cat]) + ' domains</td></tr>';
                         }
                     }
                     html += '</table>';
@@ -431,7 +435,7 @@
                                 for (var gt = 0; gt < sg.gw_tables.length; gt++) {
                                     var gwt = sg.gw_tables[gt];
                                     var entryBadge = gwt.entries > 0 ?
-                                        '<span class="label label-success">' + gwt.entries + '</span>' :
+                                        '<span class="label label-success">' + esc(gwt.entries) + '</span>' :
                                         '<span class="label label-warning">0</span>';
                                     gwList += esc(gwt.gateway) + ': ' + entryBadge + ' ';
                                 }
@@ -450,7 +454,7 @@
                         html += '<thead><tr><th>{{ lang._("Table") }}</th><th>{{ lang._("Entries") }}</th></tr></thead>';
                         for (var tbl in info.pf_tables) {
                             var cnt = info.pf_tables[tbl];
-                            var badge = cnt > 0 ? '<span class="label label-success">' + cnt + '</span>' :
+                            var badge = cnt > 0 ? '<span class="label label-success">' + esc(cnt) + '</span>' :
                                 '<span class="label label-warning">0 (empty)</span>';
                             html += '<tr><td>' + esc(tbl) + '</td><td>' + badge + '</td></tr>';
                         }
@@ -568,7 +572,7 @@
             <div class="col-md-12" style="padding-top: 1em;">
                 <p class="text-muted">
                     {{ lang._('Define your own routing categories with custom domains and CIDRs. Each category appears in the Routing Rules editor alongside built-in categories.') }}
-                    {{ lang._('Domains match all subdomains automatically (e.g. "amazonaws-us-gov.com" catches s3.us-gov-west-1.amazonaws-us-gov.com).') }}
+                    {{ lang._('Domains match all subdomains automatically (e.g. "example.com" catches cdn.eu-west-1.example.com).') }}
                 </p>
             </div>
             <table class="table table-condensed table-hover table-striped">
@@ -656,7 +660,7 @@
                                 <span class="text-danger">*</span>
                             </td>
                             <td>
-                                <input type="text" class="form-control" id="customcat_slug" placeholder="e.g. ba_work">
+                                <input type="text" class="form-control" id="customcat_slug" placeholder="e.g. work_vpn">
                                 <div class="hidden" data-for="help_for_customcat_slug">
                                     <small>{{ lang._('Lowercase letters, numbers, underscores. Becomes the pf table suffix (approuter_SLUG). Cannot be changed after creation.') }}</small>
                                 </div>
@@ -669,7 +673,7 @@
                                 <span class="text-danger">*</span>
                             </td>
                             <td>
-                                <input type="text" class="form-control" id="customcat_label" placeholder="e.g. BA Work Traffic">
+                                <input type="text" class="form-control" id="customcat_label" placeholder="e.g. Work Traffic">
                                 <div class="hidden" data-for="help_for_customcat_label">
                                     <small>{{ lang._('Display name shown in the Routing Rules category selector.') }}</small>
                                 </div>
@@ -682,10 +686,10 @@
                             </td>
                             <td>
                                 <textarea class="form-control" id="customcat_domains" rows="8"
-                                    placeholder="One per line&#10;e.g.&#10;amazonaws-us-gov.com&#10;benchmarkanalytics.atlassian.net&#10;benchmarkonline.app"></textarea>
+                                    placeholder="One per line&#10;e.g.&#10;example.com&#10;corp.example.net"></textarea>
                                 <div class="hidden" data-for="help_for_customcat_domains">
                                     <small>{{ lang._('One domain per line. All subdomains matched automatically — no need for *.') }}<br>
-                                    {{ lang._('e.g. "amazonaws-us-gov.com" catches s3.us-gov-west-1.amazonaws-us-gov.com and every other subdomain.') }}</small>
+                                    {{ lang._('e.g. "example.com" catches cdn.eu-west-1.example.com and every other subdomain.') }}</small>
                                 </div>
                             </td>
                         </tr>
@@ -715,21 +719,4 @@
     </div>
 </div>
 
-{{ partial("layout_partials/base_dialog",['fields':
-    [
-        {'id': 'rule.enabled', 'label': lang._('Enabled'), 'type': 'checkbox'},
-        {'id': 'rule.description', 'label': lang._('Description'), 'type': 'text'},
-        {'id': 'rule.interface', 'label': lang._('Interface'), 'type': 'dropdown', 'help': lang._('Inbound interface')},
-        {'id': 'rule.sourceNets', 'label': lang._('Source'), 'type': 'text', 'help': lang._('Enter "any" or comma-separated IPs/subnets (e.g. 192.168.1.0/24, 10.0.0.5)')},
-        {'id': 'rule.categories', 'label': lang._('App Categories'), 'type': 'select_multiple', 'help': lang._('Search and select app categories or individual apps')},
-        {'id': 'rule.customDomains', 'label': lang._('Custom Domains'), 'type': 'text', 'help': lang._('Comma-separated domains (e.g. example.com, cdn.test.org). All subdomains matched automatically.')},
-        {'id': 'rule.gateway', 'label': lang._('Gateway'), 'type': 'select_multiple', 'help': lang._('Select gateways in priority order (first = highest priority, last = fallback)')},
-        {'id': 'rule.smartGateway', 'label': lang._('Smart Gateway'), 'type': 'checkbox', 'help': lang._('Enable automatic gateway probing and failover (requires 2+ gateways)')},
-        {'id': 'rule.probeUrl', 'label': lang._('Probe URL'), 'type': 'text', 'help': lang._('URL to test through each gateway. Leave empty to use https://www.google.com. Examples: https://www.iqiyi.com/ (video), https://music.163.com/ (music)')},
-        {'id': 'rule.probeInterval', 'label': lang._('Probe Interval'), 'type': 'text', 'help': lang._('Seconds between probes (30-3600, default 300). Lower = faster failover but more traffic')},
-        {'id': 'rule.probeMethod', 'label': lang._('Probe Method'), 'type': 'dropdown', 'help': lang._('Connect: TCP reachability. Status Code: HTTP 403/451 = blocked. Body Match: regex on response body. Latency: pick fastest gateway')},
-        {'id': 'rule.probePattern', 'label': lang._('Probe Pattern'), 'type': 'text', 'help': lang._('Regex to detect geo-restriction in response body. Match = blocked. Example: 地区限制|not available|geo.restricted')}
-    ],
-    'id':'DialogRule',
-    'label':lang._('Edit Routing Rule')
-])}}
+{{ partial("layout_partials/base_dialog",['fields':formDialogRule,'id':'DialogRule','label':lang._('Edit Routing Rule')])}}

@@ -4,6 +4,13 @@
 # Example: sh diagnose.sh iqiyi.com
 
 DOMAIN="${1:-iqiyi.com}"
+# DOMAIN is interpolated into inline python and grep below: only allow hostnames
+case "$DOMAIN" in
+    *[!A-Za-z0-9.-]*|"")
+        echo "Invalid domain: $DOMAIN" >&2
+        exit 1
+        ;;
+esac
 CONFIG_DIR="/usr/local/etc/app-router"
 UNBOUND_DIR="$CONFIG_DIR/unbound.d"
 
