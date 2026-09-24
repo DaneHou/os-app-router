@@ -1,0 +1,72 @@
+<form>
+    <field>
+        <id>rule.enabled</id>
+        <label>Enabled</label>
+        <type>checkbox</type>
+    </field>
+    <field>
+        <id>rule.description</id>
+        <label>Description</label>
+        <type>text</type>
+    </field>
+    <field>
+        <id>rule.interface</id>
+        <label>Interface</label>
+        <type>dropdown</type>
+        <help>Inbound interface</help>
+    </field>
+    <field>
+        <id>rule.sourceNets</id>
+        <label>Source</label>
+        <type>text</type>
+        <help>Enter "any" or comma-separated IPs/subnets (e.g. 192.168.1.0/24, 10.0.0.5)</help>
+    </field>
+    <field>
+        <id>rule.categories</id>
+        <label>App Categories</label>
+        <type>select_multiple</type>
+        <help>Search and select app categories or individual apps</help>
+    </field>
+    <field>
+        <id>rule.customDomains</id>
+        <label>Custom Domains</label>
+        <type>text</type>
+        <help>Comma-separated domains (e.g. example.com, cdn.test.org). All subdomains matched automatically.</help>
+    </field>
+    <field>
+        <id>rule.gateway</id>
+        <label>Gateway</label>
+        <type>select_multiple</type>
+        <help>Select gateways in priority order (first = highest priority, last = fallback)</help>
+    </field>
+    <field>
+        <id>rule.smartGateway</id>
+        <label>Smart Gateway</label>
+        <type>checkbox</type>
+        <help>Enable automatic gateway probing and failover (requires 2+ gateways)</help>
+    </field>
+    <field>
+        <id>rule.probeUrl</id>
+        <label>Probe URL</label>
+        <type>text</type>
+        <help>http(s) URL to test through each gateway. Leave empty to use https://www.google.com. Examples: https://www.iqiyi.com/ (video), https://music.163.com/ (music)</help>
+    </field>
+    <field>
+        <id>rule.probeInterval</id>
+        <label>Probe Interval</label>
+        <type>text</type>
+        <help>Seconds between probes (30-3600, default 300). Lower = faster failover but more traffic</help>
+    </field>
+    <field>
+        <id>rule.probeMethod</id>
+        <label>Probe Method</label>
+        <type>dropdown</type>
+        <help>Connect: TCP reachability. Status Code: HTTP 403/451 = blocked. Body Match: regex on response body. Latency: pick fastest gateway</help>
+    </field>
+    <field>
+        <id>rule.probePattern</id>
+        <label>Probe Pattern</label>
+        <type>text</type>
+        <help>Regex to detect geo-restriction in response body. Match = blocked. Example: 地区限制|not available|geo.restricted</help>
+    </field>
+</form>

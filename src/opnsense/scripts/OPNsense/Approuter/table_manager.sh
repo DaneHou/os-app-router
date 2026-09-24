@@ -6,10 +6,14 @@
 
 APPROUTER_DIR="/usr/local/etc/app-router"
 CIDRS_DIR="${APPROUTER_DIR}/cidrs"
-TMPDIR="/tmp/approuter"
-TABLE_PREFIX="approuter"
+WORKDIR=""
 PFCTL="/sbin/pfctl"
 LOGGER="/usr/bin/logger"
+
+# Use the configured table prefix (must match the PHP firewall hook)
+TABLE_PREFIX=$(sed -n 's/^[[:space:]]*"table_prefix":[[:space:]]*"\([a-z][a-z0-9_]*\)".*/\1/p' \
+    "${APPROUTER_DIR}/config.json" 2>/dev/null | head -n 1)
+TABLE_PREFIX="${TABLE_PREFIX:-approuter}"
 
 log_info() {
     ${LOGGER} -t approuter -p daemon.info "$1"
@@ -20,15 +24,19 @@ log_err() {
 }
 
 ensure_dirs() {
-    mkdir -p "${TMPDIR}"
-    chmod 750 "${TMPDIR}"
+    # private per-run directory; a fixed /tmp path could be pre-created
+    # (or symlinked) by another local user and is written to as root
+    if [ -z "${WORKDIR}" ]; then
+        WORKDIR=$(mktemp -d -t approuter) || exit 1
+        trap 'rm -rf "${WORKDIR}"' EXIT
+    fi
 }
 
 reload_table() {
     local category="$1"
     local table_name="${TABLE_PREFIX}_${category}"
     local cidr_file="${CIDRS_DIR}/${category}.txt"
-    local merged_file="${TMPDIR}/${category}_merged.txt"
+    local merged_file="${WORKDIR}/${category}_merged.txt"
 
     if [ -f "${cidr_file}" ]; then
         cp "${cidr_file}" "${merged_file}"
@@ -119,8 +127,8 @@ sync_gw() {
     fi
 
     # Use replace to atomically set the gw table contents
-    local tmpfile="${TMPDIR}/sync_gw_${gw_table}.txt"
     ensure_dirs
+    local tmpfile="${WORKDIR}/sync_gw_${gw_table}.txt"
     ${PFCTL} -t "${base_table}" -T show 2>/dev/null | sed 's/^ *//' > "${tmpfile}"
     ${PFCTL} -t "${gw_table}" -T replace -f "${tmpfile}" 2>/dev/null
     local count

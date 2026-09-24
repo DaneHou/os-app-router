@@ -29,6 +29,8 @@ from pathlib import Path
 CONFIG_DIR = "/usr/local/etc/app-router/unbound.d"
 CLIENTS_DIR = Path("/usr/local/etc/app-router/clients")
 LOG_FILE = "/var/log/approuter_dns_watcher.log"
+LOG_MAX_BYTES = 5 * 1024 * 1024  # rotate once, keep a single .old copy
+PID_FILE = "/var/run/approuter_dns_watcher.pid"
 RESOLVE_INTERVAL = 300  # active resolution every 5 min (backup only)
 SMART_GW_STATE_FILE = "/usr/local/etc/app-router/smart_gateway_state.json"
 
@@ -50,11 +52,26 @@ def log(msg, level=syslog.LOG_INFO):
     except Exception:
         pass
     try:
+        # every sniffed hit is logged, keep the file from filling /var/log
+        if os.path.getsize(LOG_FILE) > LOG_MAX_BYTES:
+            os.replace(LOG_FILE, LOG_FILE + ".old")
+    except OSError:
+        pass
+    try:
         with open(LOG_FILE, "a") as f:
             t = time.strftime("%Y-%m-%d %H:%M:%S")
             f.write(f"{t} {msg}\n")
     except Exception:
         pass
+
+
+def read_pid():
+    """Return the PID from the pid file, or None if missing/garbage."""
+    try:
+        with open(PID_FILE) as f:
+            return int(f.read().strip())
+    except (OSError, ValueError):
+        return None
 
 
 def detect_unbound_port():
@@ -177,14 +194,18 @@ def match_domain(query_domain):
 
 
 def get_client_ips():
-    """Read client IPs from approuter client table files."""
+    """Read client IPs/subnets from approuter client table files."""
     client_ips = set()
     if CLIENTS_DIR.is_dir():
-        for f in CLIENTS_DIR.glob("approuter_clients_*.txt"):
+        for f in CLIENTS_DIR.glob("*_clients_*.txt"):
             for line in f.read_text().splitlines():
-                ip = line.strip().split('/')[0]
-                if ip and not ip.startswith('#'):
-                    client_ips.add(ip)
+                entry = line.strip()
+                # keep the prefix length: pfctl -k accepts networks, and
+                # stripping it would only match the network address itself
+                try:
+                    client_ips.add(str(ipaddress.ip_network(entry, strict=False)))
+                except ValueError:
+                    continue
     return client_ips
 
 
@@ -289,17 +310,24 @@ ANSWER_RE = re.compile(r'\sA\s+(\d+\.\d+\.\d+\.\d+)')
 
 
 def sniff_interface(iface):
-    """Sniff DNS responses on a single interface using tcpdump."""
+    """Sniff DNS responses on a single interface using tcpdump.
+
+    Only packets the firewall *sends* towards clients are captured (-Q out):
+    real answers (from Unbound or forwarded from upstream) leave through the
+    LAN interface, whereas a forged "response" from a LAN host arrives
+    inbound. Without this any LAN host could push arbitrary IPs into the
+    route-to tables by sending a UDP packet with source port 53.
+    """
     log(f"[sniff] Starting DNS sniffer on {iface}")
 
     while True:
         proc = None
         try:
             proc = subprocess.Popen(
-                ["/usr/sbin/tcpdump", "-U", "-l", "-n", "-i", iface,
+                ["/usr/sbin/tcpdump", "-U", "-l", "-n", "-Q", "out", "-i", iface,
                  "udp and src port 53", "-vv"],
                 stdout=subprocess.PIPE,
-                stderr=subprocess.DEVNULL,
+                stderr=subprocess.PIPE,
                 text=True,
                 bufsize=1
             )
@@ -325,6 +353,10 @@ def sniff_interface(iface):
         if proc:
             try:
                 proc.kill()
+                # tcpdump only prints a banner or an error, safe to read at exit
+                err = proc.communicate(timeout=5)[1].strip()
+                if proc.returncode not in (0, -signal.SIGKILL) and err:
+                    log(f"[sniff] tcpdump on {iface}: {err[-500:]}", syslog.LOG_ERR)
             except Exception:
                 pass
         log(f"[sniff] tcpdump on {iface} exited, restarting in 5s...")
@@ -472,10 +504,9 @@ def main():
             sys.exit(1)
 
     elif action == "stop":
-        pid_file = "/var/run/approuter_dns_watcher.pid"
-        if os.path.exists(pid_file):
-            with open(pid_file) as f:
-                pid = int(f.read().strip())
+        pid_file = PID_FILE
+        pid = read_pid()
+        if pid is not None:
             try:
                 os.kill(pid, signal.SIGTERM)
                 # Wait for process to exit (up to 5s) to avoid race with restart
@@ -495,16 +526,14 @@ def main():
             print("DNS watcher not running")
 
     elif action == "status":
-        pid_file = "/var/run/approuter_dns_watcher.pid"
-        if os.path.exists(pid_file):
-            with open(pid_file) as f:
-                pid = int(f.read().strip())
+        pid = read_pid()
+        if pid is not None:
             try:
                 os.kill(pid, 0)
                 print(json.dumps({"running": True, "pid": pid}))
             except ProcessLookupError:
                 print(json.dumps({"running": False}))
-                os.unlink(pid_file)
+                os.unlink(PID_FILE)
         else:
             print(json.dumps({"running": False}))
 

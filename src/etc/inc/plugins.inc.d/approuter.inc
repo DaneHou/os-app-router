@@ -160,7 +160,11 @@ function approuter_firewall(\OPNsense\Firewall\Plugin $fw)
             $fromClause = '<' . $clientTableName . '>';
         }
 
-        $gateways = array_filter(array_map('trim', explode(',', $rule['gateway'])));
+        // array_values: array_filter keeps keys, $gateways[0] must exist
+        $gateways = array_values(array_filter(array_map('trim', explode(',', $rule['gateway']))));
+        if (empty($gateways)) {
+            continue;
+        }
         $isSmart = ($rule['smartGateway'] === '1' && count($gateways) > 1);
 
         // Register custom domains table if rule has customDomains
