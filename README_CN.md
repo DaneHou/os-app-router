@@ -2,14 +2,14 @@
 
 [English](README.md) | 中文
 
-根据域名/CIDR 分类，将指定 LAN 客户端的流量路由到不同网关。例如，将所有国内视频网站流量走 WAN2，其余流量走 WAN1；或将公司 VPN 流量单独走企业网关，个人流量继续走主 WAN。
+根据域名/CIDR 分类，将指定 LAN 客户端的流量路由到不同网关。例如，将国内 app 和所有中国大陆 IP 走回国出口，其余流量走主 WAN；或将工作流量走 VPN 网关，个人流量继续走主 WAN。
 
 ## 功能特性
 
 - **内置分类**：国内视频、社交、电商、音乐、游戏等平台的精选域名列表
 - **自定义分类**：创建自己的域名+CIDR 分组（如公司 IP 段），在路由规则中与内置分类一起使用
-- **DNS 嗅探**：通过 tcpdump 实时捕获 DNS 响应，精准识别 CDN IP
-- **CIDR 列表**：支持社区维护的静态 IP 段列表（如 chnroutes2）
+- **DNS 嗅探**：通过 tcpdump 实时捕获 DNS 响应，精准识别 CDN IP，不再被下发的 IP 会自动过期
+- **中国 IP 分类**：将所有中国大陆网段（chnroutes2）路由到指定网关，不依赖 DNS
 - **按客户端分流**：可针对特定 LAN IP/子网设置规则，也可应用于全部流量（`any`）
 - **自定义域名**：为每条规则添加额外域名，自动匹配子域名
 - **智能网关**：基于连通性探测的自动网关选择，支持优先级和故障转移
@@ -19,7 +19,7 @@
 
 ## 系统要求
 
-- OPNsense 23.7 或更高版本
+- OPNsense 23.7 或更高版本（CI 中对最新 stable 分支和 master 做 UI 兼容检查；已在 26.7 验证）
 - 客户端使用的本地 DNS 解析器（Unbound 或 Dnsmasq），需已启用并运行
 - `make` 工具（OPNsense/FreeBSD 预装）
 - 防火墙能访问互联网（用于初次下载列表）
@@ -32,6 +32,14 @@ git clone https://github.com/DaneHou/os-app-router.git /tmp/os-app-router
 cd /tmp/os-app-router
 make install
 ```
+
+## 升级
+
+```bash
+cd /tmp/os-app-router && git pull && make install
+```
+
+然后进入 **Services > AppRouter** 点击 **Apply**，重新生成运行时配置。
 
 ## 卸载
 
@@ -52,7 +60,7 @@ rm -rf /usr/local/etc/app-router
 2. *（可选）* 进入 **Custom Categories** 标签页，创建自定义分类（如公司 VPN 地址段）
 3. 进入 **Routing Rules** 标签页，添加规则：
    - **Source**：`any` 表示所有客户端，`192.168.1.0/24` 表示某个子网
-   - **App Categories**：选择内置或自定义分类
+   - **App Categories**：选择内置或自定义分类，或 **China Mainland IPs (CIDR list)**
    - **Gateway**：目标网关
 4. 点击 **Save**，然后点击 **Apply**（会自动启动服务）
 5. 进入 **List Sources** 标签页，点击 **Update Lists Now** 下载最新数据
@@ -73,6 +81,15 @@ rm -rf /usr/local/etc/app-router
 | Gateway | 目标网关——选择多个可启用智能网关 |
 | Smart Gateway | 启用自动探测和故障转移（需选择 2 个或以上网关） |
 
+### 通用设置
+
+| 字段 | 说明 |
+|------|------|
+| Enable AppRouter | 总开关 |
+| List Update Interval | 列表更新频率：每小时/每天/每周 |
+| Learned IP Expiry (hours) | 从 DNS 学到的 IP 超过该时长没有新响应即移除（默认 24，`0` = 永不过期） |
+| Table Prefix | pf 表名前缀（默认 `approuter`） |
+
 **Source 示例：**
 ```
 any                              — 所有 LAN 客户端
@@ -88,24 +105,23 @@ any                              — 所有 LAN 客户端
 **创建自定义分类：**
 1. 进入 **Custom Categories** 标签页 → **Add Category**
 2. 填写：
-   - **Slug**：内部唯一标识（小写字母/数字/下划线，如 `ba_work`）
+   - **Slug**：内部唯一标识（小写字母/数字/下划线，如 `work_vpn`；`china_all` 为保留名）
    - **Label**：在规则编辑器中显示的名称
-   - **Domains**：每行一个域名，或用逗号分隔；自动匹配子域名（如填 `amazonaws-us-gov.com` 也会匹配 `s3.us-gov-west-1.amazonaws-us-gov.com`）
-   - **Static CIDRs**：直接路由的 IP 地址或网段（如 `172.16.20.85`、`10.0.0.0/24`）
+   - **Domains**：每行一个域名，或用逗号分隔；自动匹配子域名（如填 `example.com` 也会匹配 `cdn.eu-west-1.example.com`）
+   - **Static CIDRs**：直接路由的 IP 地址或网段（如 `203.0.113.10`、`198.51.100.0/24`），不会过期
 3. 点击 **Save**，然后点击 **Apply**
 
-**示例——公司流量：**
+**示例——工作流量：**
 ```
-Slug:    ba_work
-Label:   BA Work
-Domains: atlassian.net
-         confluence.example.com
-         amazonaws-us-gov.com
-CIDRs:   172.16.20.85
-         172.16.16.0/24
+Slug:    work_vpn
+Label:   Work VPN
+Domains: corp.example.com
+         intranet.example.net
+CIDRs:   203.0.113.10
+         198.51.100.0/24
 ```
 
-然后创建一条路由规则，选择 `BA Work` 分类，目标网关设为公司 VPN 网关即可。
+然后创建一条路由规则，选择 `Work VPN` 分类，目标网关设为 VPN 网关即可。
 
 ### 智能网关
 
@@ -115,10 +131,13 @@ CIDRs:   172.16.20.85
 1. 在路由规则中选择**两个或以上**网关（优先级从上到下）
 2. 启用 **Smart Gateway** 开关
 3. 选择探测方式：
-   - `connect_only`：TCP 连接测试（快速，无 HTTP 开销）
-   - `http_2xx`：需要收到 HTTP 200–299 响应
-   - `body_match`：需要响应体中包含指定内容
-4. 填写 **Probe URL**（如 `https://www.google.com`）和 **Probe Interval**（秒）
+   - `connect_only`：TCP/TLS 连接测试（快速）
+   - `status_code`：HTTP 2xx/3xx 视为通过，403/451 视为地区封锁
+   - `body_match`：响应体匹配 **Probe Pattern**（正则）即视为封锁
+   - `latency`：选择通过探测且延迟最低的网关
+4. 填写 **Probe URL**（仅限 `http://` 或 `https://`，默认 `https://www.google.com`）和 **Probe Interval**（30–3600 秒）
+
+连续 3 次结果一致才会切换网关，且每 5 分钟最多切换一次。
 
 优先级最高且探测通过的网关成为活跃网关；若失败，则尝试下一个；最后一个网关始终作为兜底。
 
@@ -150,8 +169,9 @@ AppRouter 按计划定时下载域名和 CIDR 列表。在 **List Sources** 标�
 # 检查 pf 表是否有数据
 pfctl -t approuter_video -T show
 
-# 检查自定义分类表
-pfctl -t approuter_ba_work -T show
+# 检查自定义分类表 / 中国 IP 表
+pfctl -t approuter_work_vpn -T show
+pfctl -t approuter_china_all -T show | wc -l
 
 # 检查路由规则是否已安装
 pfctl -sr | grep approuter
@@ -187,14 +207,15 @@ CDN 域名会根据解析器位置和时间返回不同的 IP，DNS 嗅探器会
 
 ### 无关网站被屏蔽或出现地理封锁报错
 
-如果商业网站（如美国电商）在某些设备上出现访问拒绝，在其他设备上正常：
+如果不在任何分类中的网站（如美国电商）也被路由到规则网关，通常是它和某个已分类应用共用了 CDN IP：
 
-- 这曾是由于 DNS 嗅探器为 CDN IP 自动添加 `/24` 子网段，导致共用同一 CDN 的无关网站被误路由。该行为已移除——AppRouter 现在只写入具体解析 IP。
-- 如果旧表中仍有遗留的 `/24` 条目，点击 **Apply** 清空并重新填充即可。
+- 学到的 IP 在 **Learned IP Expiry** 小时内没有新的 DNS 响应就会过期，如经常出现可调低（如 6）
+- 查看某个 IP 在哪个表里：`pfctl -t approuter_video -T test <ip>`
+- **China Mainland IPs** 规则按目的网段路由：部署在中国大陆的网站始终会走该规则
 
 ### 中国 CIDR 列表无法加载
 
-默认源为 `misakaio/chnroutes2`。如果配置的 URL 失败，插件会自动回退到内置默认 URL。如果两者都失败：
+该列表只被使用 **China Mainland IPs (CIDR list)** 分类的规则用到。默认源为 `misakaio/chnroutes2`。如果配置的 URL 失败，插件会自动回退到内置默认 URL。如果两者都失败：
 1. 在 **Status** 标签页查看日志中的错误信息
 2. 在 **List Sources** 中更新 CIDR URL（旧的 `ruijzhan/chnroute` URL 已不可用）
 3. 执行 **Force Full Update**
@@ -205,15 +226,22 @@ CDN 域名会根据解析器位置和时间返回不同的 IP，DNS 嗅探器会
 2. 检查系统日志：`grep approuter /var/log/system/latest.log`
 3. 检查 DNS 嗅探器日志：`cat /var/log/approuter_dns_watcher.log`
 4. 确认 Unbound/Dnsmasq 正在运行
+5. 端到端排查单个域名：`sh /usr/local/opnsense/scripts/OPNsense/Approuter/diagnose.sh example.com`
 
 ## 数据源
 
 | 来源 | 内容 | 地址 |
 |------|------|------|
-| dnsmasq-china-list | 中国域名列表 | github.com/felixonmars/dnsmasq-china-list |
+| dnsmasq-china-list | 中国域名列表（会下载，目前仅作参考） | github.com/felixonmars/dnsmasq-china-list |
 | chnroutes2 | 中国 IPv4 CIDR | github.com/misakaio/chnroutes2 |
 | v2fly/domain-list-community | 应用专属域名 | github.com/v2fly/domain-list-community |
 | 内置分类 | 精选应用域名 | 随插件分发 |
+
+## 安全说明
+
+- 只信任防火墙*发出*的 DNS 响应（`tcpdump -Q out`），LAN 主机无法通过伪造数据包注入 IP
+- 远程列表和用户输入的域名在写入前都会校验；运行时配置经 JSON 转义生成
+- Probe URL 仅允许 http/https；临时文件使用私有的 `mktemp` 路径
 
 ## 开发
 
@@ -222,8 +250,14 @@ make install          # 安装并激活（在 OPNsense 上）
 make install-plugin   # 仅复制文件（不激活）
 make activate         # 刷新缓存，重启服务
 make lint             # 检查 Python 语法和 XML 格式
+make test             # lint + pytest（需要 pytest 和 jinja2）
 make clean            # 清理 __pycache__ 和 .pyc 文件
+
+# 用 OPNsense core 源码检查 UI 兼容性（需要 phalcon PHP 扩展）
+php tests/ui/render.php src /path/to/opnsense-core/src
 ```
+
+CI（`.github/workflows/ci.yml`）在每次推送及每周自动运行单元测试，并用 OPNsense core master 和最新 stable 分支渲染界面，提前发现上游模板变更导致的问题。
 
 ### 文件结构
 
@@ -232,17 +266,23 @@ src/
 ├── etc/inc/plugins.inc.d/
 │   └── approuter.inc              # pf 表、规则、服务、定时任务钩子
 ├── opnsense/mvc/app/
-│   ├── controllers/.../Api/
-│   │   ├── SettingsController.php  # 规则、设置、自定义分类 CRUD
-│   │   └── ServiceController.php   # 重新配置、状态、启停
+│   ├── controllers/.../Approuter/
+│   │   ├── Api/SettingsController.php  # 规则、设置、自定义分类 CRUD
+│   │   ├── Api/ServiceController.php   # 重新配置、状态、启停
+│   │   └── forms/                      # 通用设置、列表源、规则对话框表单定义
 │   ├── models/.../Approuter.xml    # XML 数据模型（设置、规则、列表、自定义分类）
 │   └── views/.../index.volt        # 单页 Web UI
-└── opnsense/scripts/.../Approuter/
-    ├── list_updater.py             # 拉取/处理远程列表，生成 DNS 配置
-    ├── dns_watcher.py              # DNS 嗅探守护进程
-    ├── geo_prober.py               # 智能网关连通性探测
-    ├── table_manager.sh            # pfctl 表操作
-    └── app_categories.json         # 内置域名分类
+├── opnsense/scripts/.../Approuter/
+│   ├── list_updater.py             # 拉取/处理远程列表，生成域名映射和 CIDR 文件
+│   ├── dns_watcher.py              # DNS 嗅探守护进程，学到的 IP 过期清理
+│   ├── geo_prober.py               # 智能网关连通性探测
+│   ├── table_manager.sh            # pfctl 表操作
+│   ├── diagnose.sh                 # 手动排查脚本（sh diagnose.sh <域名>）
+│   └── app_categories.json         # 内置域名分类
+└── opnsense/service/templates/.../approuter.conf  # config.json 模板（configd）
+tests/
+├── test_*.py                       # pytest：列表解析、过期逻辑、模板渲染
+└── ui/render.php                   # 用 OPNsense core 源码渲染页面
 ```
 
 ## 许可证
