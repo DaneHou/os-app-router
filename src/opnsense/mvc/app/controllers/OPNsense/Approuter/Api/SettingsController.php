@@ -216,7 +216,13 @@ class SettingsController extends ApiMutableModelControllerBase
 
     public function getCategoriesAction()
     {
-        $result = ['rows' => []];
+        // IP based category: all mainland China networks from the China CIDR
+        // list (List Sources tab), loaded into <prefix>_china_all by
+        // list_updater. Matches destinations regardless of domain or DNS.
+        $result = ['rows' => [[
+            'value' => 'china_all',
+            'label' => gettext('China Mainland IPs (CIDR list)'),
+        ]]];
         $categoriesFile = '/usr/local/opnsense/scripts/OPNsense/Approuter/app_categories.json';
         if (file_exists($categoriesFile)) {
             $data = json_decode(file_get_contents($categoriesFile), true);

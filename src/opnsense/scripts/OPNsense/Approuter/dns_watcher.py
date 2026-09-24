@@ -24,14 +24,22 @@ import time
 import signal
 import syslog
 import threading
+import xml.etree.ElementTree as ET
 from pathlib import Path
 
-CONFIG_DIR = "/usr/local/etc/app-router/unbound.d"
-CLIENTS_DIR = Path("/usr/local/etc/app-router/clients")
+APPROUTER_DIR = "/usr/local/etc/app-router"
+CONFIG_DIR = f"{APPROUTER_DIR}/unbound.d"
+CLIENTS_DIR = Path(f"{APPROUTER_DIR}/clients")
+CIDRS_DIR = f"{APPROUTER_DIR}/cidrs"
+CONFIG_FILE = f"{APPROUTER_DIR}/config.json"
+SEEN_FILE = f"{APPROUTER_DIR}/ip_seen.json"
+OPNSENSE_CONFIG = "/conf/config.xml"
 LOG_FILE = "/var/log/approuter_dns_watcher.log"
 LOG_MAX_BYTES = 5 * 1024 * 1024  # rotate once, keep a single .old copy
 PID_FILE = "/var/run/approuter_dns_watcher.pid"
 RESOLVE_INTERVAL = 300  # active resolution every 5 min (backup only)
+EXPIRE_CHECK_INTERVAL = 600  # how often to look for stale table entries
+DEFAULT_EXPIRE_HOURS = 24
 SMART_GW_STATE_FILE = "/usr/local/etc/app-router/smart_gateway_state.json"
 
 # Unbound listener — for active resolution fallback
@@ -39,6 +47,14 @@ UNBOUND_ADDR = "127.0.0.1"
 UNBOUND_PORT = 53530
 
 domain_table_map = {}
+# Runtime settings from config.json (reloaded on SIGHUP)
+settings = {"table_prefix": "approuter", "expire_seconds": DEFAULT_EXPIRE_HOURS * 3600, "rules": []}
+# Last time each dynamically learned IP was seen in a DNS answer:
+# {table: {ip: unix_ts}}. Used to age out CDN IPs that are no longer
+# handed out, otherwise tables only ever grow and unrelated sites sharing
+# those CDN IPs get routed through the rule's gateway.
+ip_seen = {}
+ip_seen_lock = threading.Lock()
 # Lock for concurrent table updates from multiple sniffer threads
 table_lock = threading.Lock()
 # Active gateway tables (populated by geo_prober, read via SIGHUP)
@@ -77,6 +93,10 @@ def read_pid():
 def detect_unbound_port():
     """Read Unbound's listening port from its config."""
     global UNBOUND_PORT
+    if not os.path.exists("/var/unbound/unbound.conf"):
+        # Unbound not in use (e.g. Dnsmasq serves DNS): query the local resolver on 53
+        UNBOUND_PORT = 53
+        return
     try:
         with open("/var/unbound/unbound.conf") as f:
             for line in f:
@@ -90,12 +110,57 @@ def detect_unbound_port():
         pass
 
 
+def load_settings():
+    """Load the few config.json values the watcher needs."""
+    try:
+        with open(CONFIG_FILE) as f:
+            config = json.load(f)
+    except (OSError, ValueError) as e:
+        log(f"Could not read {CONFIG_FILE}: {e}", syslog.LOG_WARNING)
+        return
+    prefix = config.get("table_prefix") or "approuter"
+    if not re.match(r'^[a-z][a-z0-9_]{0,30}$', prefix):
+        prefix = "approuter"
+    try:
+        hours = int(config.get("ip_expire_hours", DEFAULT_EXPIRE_HOURS))
+    except (TypeError, ValueError):
+        hours = DEFAULT_EXPIRE_HOURS
+    settings["table_prefix"] = prefix
+    settings["expire_seconds"] = max(hours, 0) * 3600
+    settings["rules"] = config.get("rules", [])
+
+
+def rule_interface_devices():
+    """Map the OPNsense interfaces used by rules (lan, opt1, ...) to devices.
+
+    Route-to rules match inbound on these interfaces, so DNS answers for the
+    affected clients leave the firewall there. Works regardless of which DNS
+    resolver is used or how Unbound's listen interfaces are configured.
+    """
+    names = {r.get("interface") for r in settings["rules"] if r.get("interface")}
+    if not names:
+        return []
+    try:
+        root = ET.parse(OPNSENSE_CONFIG).getroot()
+    except (OSError, ET.ParseError) as e:
+        log(f"Could not read {OPNSENSE_CONFIG}: {e}", syslog.LOG_WARNING)
+        return []
+    devices = []
+    ifaces = root.find("interfaces")
+    for name in sorted(names):
+        node = ifaces.find(name) if ifaces is not None else None
+        dev = node.findtext("if") if node is not None else None
+        if dev and re.match(r'^[a-zA-Z0-9_.]+$', dev):
+            devices.append(dev)
+    return devices
+
+
 def detect_lan_interfaces():
     """Find LAN and WG interface names for DNS sniffing.
 
-    Detects LAN interfaces from Unbound's listening IPs, plus any
-    WireGuard interfaces (wg*) so that DNS queries from VPN clients
-    are also captured for pf table population.
+    Uses the interfaces referenced by rules, LAN interfaces from Unbound's
+    listening IPs, plus any WireGuard interfaces (wg*) so that DNS queries
+    from VPN clients are also captured for pf table population.
     """
     # Read Unbound's interface IPs (skip loopback and link-local)
     listen_ips = set()
@@ -111,9 +176,6 @@ def detect_lan_interfaces():
                     listen_ips.add(ip)
     except IOError:
         pass
-
-    if not listen_ips:
-        return []
 
     # Map IPs to interface names via ifconfig, also collect WG interfaces
     iface_map = {}
@@ -141,6 +203,9 @@ def detect_lan_interfaces():
         pass
 
     interfaces = list(set(iface_map.values()))
+    for dev in rule_interface_devices():
+        if dev not in interfaces:
+            interfaces.append(dev)
     # Add WG interfaces that aren't already detected via Unbound listen IPs
     for wg in wg_interfaces:
         if wg not in interfaces:
@@ -228,6 +293,146 @@ def add_to_table(table, addrs):
     return 0
 
 
+def delete_from_table(table, addrs):
+    """Remove single IPs from a pf table (in chunks to keep argv small)."""
+    addrs = list(addrs)
+    for i in range(0, len(addrs), 500):
+        try:
+            subprocess.run(
+                ["/sbin/pfctl", "-t", table, "-T", "delete"] + addrs[i:i + 500],
+                capture_output=True, text=True, timeout=30
+            )
+        except (subprocess.TimeoutExpired, OSError) as e:
+            log(f"Failed to delete IPs from {table}: {e}", syslog.LOG_ERR)
+
+
+def show_table(table):
+    try:
+        result = subprocess.run(
+            ["/sbin/pfctl", "-t", table, "-T", "show"],
+            capture_output=True, text=True, timeout=30
+        )
+    except (subprocess.TimeoutExpired, OSError):
+        return None
+    if result.returncode != 0:
+        return None
+    return [line.strip() for line in result.stdout.splitlines() if line.strip()]
+
+
+def mark_seen(table, addrs):
+    now = time.time()
+    with ip_seen_lock:
+        seen = ip_seen.setdefault(table, {})
+        for ip in addrs:
+            seen[ip] = now
+
+
+def static_entries(table):
+    """Entries configured statically (custom category CIDRs) for a table."""
+    prefix = settings["table_prefix"] + "_"
+    if not table.startswith(prefix):
+        return set()
+    path = os.path.join(CIDRS_DIR, table[len(prefix):] + ".txt")
+    result = set()
+    try:
+        with open(path) as f:
+            for line in f:
+                entry = line.strip()
+                if entry.endswith("/32"):
+                    entry = entry[:-3]
+                if entry:
+                    result.add(entry)
+    except OSError:
+        pass
+    return result
+
+
+def load_seen():
+    global ip_seen
+    try:
+        with open(SEEN_FILE) as f:
+            data = json.load(f)
+        if isinstance(data, dict):
+            with ip_seen_lock:
+                ip_seen = {t: {ip: float(ts) for ip, ts in v.items()} for t, v in data.items()}
+    except (OSError, ValueError, AttributeError, TypeError):
+        pass
+
+
+def save_seen():
+    with ip_seen_lock:
+        data = json.dumps(ip_seen)
+    try:
+        tmp = SEEN_FILE + ".tmp"
+        with open(tmp, "w") as f:
+            f.write(data)
+        os.replace(tmp, SEEN_FILE)
+    except OSError as e:
+        log(f"Failed to write {SEEN_FILE}: {e}", syslog.LOG_ERR)
+
+
+def expire_stale_entries():
+    """Delete learned IPs that no DNS answer has returned for expire_seconds.
+
+    Entries present in pf but unknown to us (e.g. added before this feature
+    or while the watcher was down) start their grace period now instead of
+    being deleted. Static CIDRs of custom categories are never touched.
+    """
+    expire = settings["expire_seconds"]
+    if expire <= 0:
+        return 0
+    now = time.time()
+    tables = set()
+    for t in domain_table_map.values():
+        tables.update(t)
+    total = 0
+    for table in sorted(tables):
+        entries = show_table(table)
+        if entries is None:
+            continue
+        static = static_entries(table)
+        stale = []
+        with ip_seen_lock:
+            seen = ip_seen.setdefault(table, {})
+            present = set()
+            for ip in entries:
+                if "/" in ip or ip in static:
+                    continue
+                present.add(ip)
+                ts = seen.get(ip)
+                if ts is None:
+                    seen[ip] = now
+                elif now - ts > expire:
+                    stale.append(ip)
+            # forget IPs that are gone from pf (flushed, reboot, expired)
+            for ip in list(seen):
+                if ip not in present or ip in stale:
+                    del seen[ip]
+        if stale:
+            with table_lock:
+                delete_from_table(table, stale)
+                for gw_table in get_active_gw_tables_for(table):
+                    delete_from_table(gw_table, stale)
+            total += len(stale)
+            log(f"[expire] Removed {len(stale)} stale entries from {table}")
+    # drop bookkeeping for tables no longer mapped
+    with ip_seen_lock:
+        for table in list(ip_seen):
+            if table not in tables:
+                del ip_seen[table]
+    save_seen()
+    return total
+
+
+def expire_loop():
+    while True:
+        time.sleep(EXPIRE_CHECK_INTERVAL)
+        try:
+            expire_stale_entries()
+        except Exception as e:
+            log(f"Expiry error: {e}", syslog.LOG_ERR)
+
+
 def kill_stale_states(new_ips, client_ips):
     """Kill existing pf states so new connections use the route-to rule."""
     if not new_ips or not client_ips:
@@ -288,6 +493,7 @@ def process_sniffed_dns(query_domain, answer_ips):
     with table_lock:
         total_added = 0
         for table in tables:
+            mark_seen(table, addrs)
             added = add_to_table(table, addrs)
             if added > 0:
                 total_added += added
@@ -397,6 +603,7 @@ def resolve_and_update():
     """Active resolution via drill as backup. Resolves bare + www. variants."""
     if not domain_table_map:
         return 0
+    started = time.time()
 
     # Collect domains per table (a domain may belong to multiple tables)
     table_domains = {}
@@ -413,10 +620,13 @@ def resolve_and_update():
             if not domain.startswith("www."):
                 variants.append(f"www.{domain}")
             for variant in variants:
-                ips = resolve_via_unbound(variant)
-                for ip in ips:
-                    addrs.add(ip)
+                for ip in resolve_via_unbound(variant):
+                    # same filter as the sniffer: never route private ranges
+                    addr = ipaddress.ip_address(ip)
+                    if addr.version == 4 and not addr.is_private:
+                        addrs.add(ip)
 
+        mark_seen(table, addrs)
         added = add_to_table(table, addrs)
         if added > 0:
             total_added += added
@@ -433,6 +643,7 @@ def resolve_and_update():
         if client_ips:
             kill_stale_states(all_new_ips, client_ips)
 
+    log(f"[resolve] Resolved {len(domain_table_map)} domains in {time.time() - started:.0f}s")
     return total_added
 
 
@@ -450,6 +661,7 @@ def active_resolve_loop():
 def reload_mappings(signum=None, frame=None):
     """SIGHUP handler: reload domain mappings and smart gateway state."""
     log("Received SIGHUP, reloading domain mappings and smart gateway state")
+    load_settings()
     load_domain_mappings()
     load_smart_gw_state()
     resolve_and_update()
@@ -470,6 +682,8 @@ def main():
         signal.signal(signal.SIGHUP, reload_mappings)
 
         detect_unbound_port()
+        load_settings()
+        load_seen()
         load_domain_mappings()
         load_smart_gw_state()
         log(f"DNS watcher started (PID {os.getpid()})")
@@ -494,6 +708,9 @@ def main():
         resolver_thread = threading.Thread(target=active_resolve_loop,
                                           daemon=True)
         resolver_thread.start()
+
+        # Age out learned IPs that DNS no longer returns
+        threading.Thread(target=expire_loop, daemon=True).start()
 
         # Main thread stays alive
         try:

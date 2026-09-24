@@ -8,6 +8,8 @@
                 <Default>0</Default>
                 <Required>Y</Required>
             </enabled>
+            <!-- Kept for config compatibility only: DNS answers are always
+                 learned by dns_watcher, independent of the resolver used. -->
             <dnsResolver type="OptionField">
                 <Default>dnsmasq</Default>
                 <OptionValues>
@@ -25,6 +27,13 @@
                 </OptionValues>
                 <Required>Y</Required>
             </updateInterval>
+            <ipExpireHours type="IntegerField">
+                <Default>24</Default>
+                <MinimumValue>0</MinimumValue>
+                <MaximumValue>720</MaximumValue>
+                <Required>Y</Required>
+                <ValidationMessage>Enter a value between 0 and 720 hours</ValidationMessage>
+            </ipExpireHours>
             <tablePrefix type="TextField">
                 <Default>approuter</Default>
                 <Required>Y</Required>
@@ -110,8 +119,8 @@
             <category type="ArrayField">
                 <slug type="TextField">
                     <Required>Y</Required>
-                    <Mask>/^[a-z][a-z0-9_]{0,30}$/</Mask>
-                    <ValidationMessage>Lowercase letters, numbers, underscores only (must start with a letter)</ValidationMessage>
+                    <Mask>/^(?!china_all$)[a-z][a-z0-9_]{0,30}$/</Mask>
+                    <ValidationMessage>Lowercase letters, numbers, underscores only (must start with a letter; "china_all" is reserved)</ValidationMessage>
                 </slug>
                 <label type="TextField">
                     <Required>Y</Required>

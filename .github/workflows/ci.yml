@@ -1,0 +1,56 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  # Weekly run against OPNsense core master: catches upstream template/API
+  # changes (like the 26.7 base_dialog refactor) before a firmware upgrade does.
+  schedule:
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
+
+jobs:
+  python:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install test dependencies
+        run: pip install pytest jinja2
+      - name: Syntax checks
+        run: |
+          python -m py_compile src/opnsense/scripts/OPNsense/Approuter/*.py
+          for f in src/opnsense/scripts/OPNsense/Approuter/*.sh pkg/+*; do sh -n "$f"; done
+          sudo apt-get install -y -qq libxml2-utils
+          find src -name '*.xml' -print0 | xargs -0 xmllint --noout
+      - name: Unit tests
+        run: python -m pytest -q tests
+
+  ui-compat:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        core: [master, latest-stable]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.4"
+          extensions: phalcon5, simplexml
+          tools: none
+      - name: PHP lint
+        run: find src -name '*.php' -o -name '*.inc' | xargs -n1 php -l
+      - name: Fetch OPNsense core (${{ matrix.core }})
+        run: |
+          ref="${{ matrix.core }}"
+          if [ "$ref" = "latest-stable" ]; then
+            ref=$(git ls-remote --heads https://github.com/opnsense/core 'stable/*' \
+                  | sed 's|.*refs/heads/||' | sort -V | tail -n 1)
+          fi
+          echo "Using opnsense/core $ref"
+          git clone --depth 1 --branch "$ref" https://github.com/opnsense/core.git "$RUNNER_TEMP/core"
+      - name: Render AppRouter page with core templates
+        run: php tests/ui/render.php src "$RUNNER_TEMP/core/src"

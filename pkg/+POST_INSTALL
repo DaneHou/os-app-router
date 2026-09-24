@@ -3,7 +3,6 @@
 # Create data directories
 mkdir -p /usr/local/etc/app-router/domains
 mkdir -p /usr/local/etc/app-router/cidrs
-mkdir -p /usr/local/etc/app-router/dnsmasq.d
 mkdir -p /usr/local/etc/app-router/unbound.d
 mkdir -p /var/run/approuter
 

@@ -379,7 +379,6 @@
                     html += '<table class="table table-condensed table-striped">';
                     html += '<tr><td style="width:200px">{{ lang._("Plugin Enabled") }}</td><td>' +
                         (info.enabled === '1' ? '<span class="label label-success">Yes</span>' : '<span class="label label-danger">No</span>') + '</td></tr>';
-                    html += '<tr><td>{{ lang._("DNS Resolver") }}</td><td>' + esc(info.dns_resolver || 'N/A') + '</td></tr>';
                     if (info.dns_watcher) {
                         var watcherLabel = info.dns_watcher.running ?
                             '<span class="label label-success">Running (PID ' + esc(info.dns_watcher.pid) + ')</span>' :

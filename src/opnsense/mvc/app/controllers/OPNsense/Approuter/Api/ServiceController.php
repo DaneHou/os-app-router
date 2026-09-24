@@ -89,13 +89,24 @@ class ServiceController extends ApiMutableServiceControllerBase
             $mdl = new Approuter();
             $tablePrefix = (string)$mdl->general->tablePrefix ?: 'approuter';
             $cidrsDir = '/usr/local/etc/app-router/cidrs';
+            $slugs = ['china_all'];  // built-in China CIDR category
             foreach ($mdl->customCategories->category->iterateItems() as $uuid => $cat) {
-                $slug = (string)$cat->slug;
+                $slugs[] = (string)$cat->slug;
+            }
+            // only touch tables that a rule actually uses (registered by the
+            // firewall hook); pfctl -T replace would otherwise create them
+            $pfTables = [];
+            exec('/sbin/pfctl -s Tables 2>/dev/null', $pfTables);
+            $pfTables = array_map('trim', $pfTables);
+            foreach ($slugs as $slug) {
                 if (empty($slug)) {
                     continue;
                 }
                 $cidrFile = $cidrsDir . '/' . $slug . '.txt';
                 $pfTable = $tablePrefix . '_' . $slug;
+                if (!in_array($pfTable, $pfTables, true)) {
+                    continue;
+                }
                 if (file_exists($cidrFile) && filesize($cidrFile) > 0) {
                     $pfOut = [];
                     $pfRet = 0;
@@ -222,9 +233,7 @@ class ServiceController extends ApiMutableServiceControllerBase
         $watcherData = json_decode($watcherResponse, true);
         $data['dns_watcher'] = $watcherData ?: ['running' => false];
 
-        // DNS resolver mode
         $mdl = new Approuter();
-        $data['dns_resolver'] = (string)$mdl->general->dnsResolver ?: 'dnsmasq';
         $data['enabled'] = (string)$mdl->general->enabled;
 
         // Build rule description lookup: hash(uuid) => description
