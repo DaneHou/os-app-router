@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-OPNsense plugin for application-aware traffic routing. Routes traffic through specific gateways based on domain/CIDR categories (e.g., route all video streaming through WAN2). Integrates with FreeBSD's pf packet filter and supports Dnsmasq (ipset) or Unbound (log watcher) for DNS-based resolution.
+OPNsense plugin for application-aware traffic routing. Routes traffic through specific gateways based on domain/CIDR categories (e.g., route all video streaming through WAN2). Integrates with FreeBSD's pf packet filter; domain categories are turned into IPs by a DNS response sniffer (works with Unbound or Dnsmasq).
 
 ## Build & Install Commands
 
@@ -15,7 +15,13 @@ make activate         # Flush caches, verify PHP, restart services
 make uninstall        # Remove plugin (preserves config.json)
 make clean            # Remove __pycache__ and .pyc files
 make lint             # Check Python syntax and XML validity
+make test             # lint + pytest (tests/, needs pytest + jinja2)
+
+# UI compatibility check against an OPNsense core checkout (needs the phalcon extension)
+php tests/ui/render.php src /path/to/opnsense-core/src
 ```
+
+CI (`.github/workflows/ci.yml`) runs both, plus a weekly render against core master.
 
 All installation targets `/usr/local/` on the OPNsense/FreeBSD host. Development is done on a separate machine and deployed via `make install` to the firewall.
 
@@ -65,10 +71,12 @@ Web UI (Volt/jQuery) → REST API (PHP Controllers) → configd actions → Pyth
 /api/approuter/service/detailStatus                                  — Detailed status (pf tables, rule stats, logs)
 ```
 
-### Dual DNS Modes
+### DNS Learning
 
-- **Dnsmasq**: Native ipset support — domains resolved directly into pf tables at DNS query time
-- **Unbound**: `dns_watcher.py` daemon sniffs DNS responses via tcpdump, parses A/AAAA answers, adds IPs to tables via pfctl
+- `dns_watcher.py` sniffs outbound DNS responses (tcpdump `-Q out`) on rule interfaces (resolved via `/conf/config.xml`), Unbound listen interfaces and `wg*`; A answers for mapped domains are added to pf tables via pfctl
+- Learned IPs age out after `general.ipExpireHours` (tracked in `ip_seen.json`); static custom-category CIDRs are never expired
+- `general.dnsResolver` is kept only for config compatibility; there is no Dnsmasq ipset integration
+- `china_all` is a built-in IP category backed by `cidrs/china_all.txt` (chnroutes2); the slug is reserved
 
 ### UI Conventions
 

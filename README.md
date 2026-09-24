@@ -20,7 +20,7 @@ Route traffic from specific LAN clients through designated gateways based on dom
 ## Requirements
 
 - OPNsense 23.7 or later
-- DNS resolver: **Dnsmasq** (recommended) or **Unbound** — must be enabled and running
+- A local DNS resolver (Unbound or Dnsmasq) that clients use — must be enabled and running
 - `make` utility (pre-installed on OPNsense/FreeBSD)
 - Internet access from the firewall (for initial list download)
 
@@ -48,7 +48,7 @@ rm -rf /usr/local/etc/app-router
 
 ## Quick Start
 
-1. Enable AppRouter in **Services > AppRouter > General** and select your DNS resolver
+1. Enable AppRouter in **Services > AppRouter > General**
 2. *(Optional)* Go to **Custom Categories** to define private domain/IP groups (e.g., company VPN ranges)
 3. Go to **Routing Rules** and add a rule:
    - **Source**: `any` for all clients, or `192.168.1.0/24` for a subnet
@@ -126,20 +126,23 @@ The first gateway in priority order that passes the probe becomes active. If it 
 
 AppRouter downloads domain and CIDR lists on a schedule. Configure source URLs and update intervals in the **List Sources** tab. Click **Update Lists Now** for an immediate update or **Force Full Update** to bypass ETag caching.
 
-## DNS Modes
+## How Domains Become Routes
 
-### Dnsmasq (ipset) — Recommended
+Domain based categories are matched by IP address, learned from DNS:
 
-- Domains resolved directly into pf tables at DNS query time via Dnsmasq's native `ipset` directive
-- Config files generated in `/usr/local/etc/app-router/dnsmasq.d/`
-- Most efficient: zero-latency IP capture
+- `dns_watcher.py` sniffs DNS responses the firewall sends to clients (tcpdump, outbound only) on the interfaces used by rules plus WireGuard interfaces
+- A record answers for matching domains (and subdomains) are added to the category's pf table
+- Periodic active resolution via `drill` pre-populates tables (every 5 minutes)
+- Learned IPs expire when no DNS answer has returned them for **Learned IP Expiry** hours (default 24, `0` = never), so rotating/shared CDN addresses don't pile up
+- Works with Unbound or Dnsmasq; domain-to-table mapping files live in `/usr/local/etc/app-router/unbound.d/`
 
-### Unbound (DNS Sniffer)
+**China Mainland IPs (CIDR list)** is an IP based category: every network in the China CIDR list (chnroutes2) is routed, no DNS involved. For "domestic Chinese apps via a China exit" this is the most robust option; combine it with app categories for services hosted abroad.
 
-- `dns_watcher.py` daemon sniffs DNS responses via tcpdump on LAN interfaces
-- Parses A record answers and adds IPs to pf tables via pfctl
-- Also runs periodic active resolution via `drill` as fallback (every 5 minutes)
-- Domain-to-table mapping files in `/usr/local/etc/app-router/unbound.d/`
+### Limitations
+
+- Only plain DNS over UDP port 53 answered via the firewall is seen. Clients using DoH/DoT (browser "secure DNS", iCloud Private Relay) or another resolver bypass domain categories — redirect or block those if you depend on them.
+- IPv4 only: AAAA answers are ignored and rules are `inet`. Dual-stack clients may reach services over IPv6 around the rules.
+- The first connection after a new DNS answer may still leave via the default gateway; existing states for newly learned IPs are killed so the client reconnects through the rule.
 
 ## Verification
 

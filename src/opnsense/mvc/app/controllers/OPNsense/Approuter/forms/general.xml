@@ -6,16 +6,16 @@
         <help>Enable application-aware routing</help>
     </field>
     <field>
-        <id>approuter.general.dnsResolver</id>
-        <label>DNS Resolver</label>
-        <type>dropdown</type>
-        <help>Select which DNS resolver to integrate with. Dnsmasq uses native ipset support. Unbound uses a log-watching daemon.</help>
-    </field>
-    <field>
         <id>approuter.general.updateInterval</id>
         <label>List Update Interval</label>
         <type>dropdown</type>
         <help>How often to fetch updated domain and CIDR lists from remote sources.</help>
+    </field>
+    <field>
+        <id>approuter.general.ipExpireHours</id>
+        <label>Learned IP Expiry (hours)</label>
+        <type>text</type>
+        <help>IPs learned from DNS answers are removed from the routing tables when no DNS answer has returned them for this long. CDN addresses rotate and are shared between sites, so keeping them forever slowly routes unrelated traffic through the rule's gateway. 0 = never expire.</help>
     </field>
     <field>
         <id>approuter.general.tablePrefix</id>

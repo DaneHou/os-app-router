@@ -20,7 +20,7 @@
 ## 系统要求
 
 - OPNsense 23.7 或更高版本
-- DNS 解析器：**Dnsmasq**（推荐）或 **Unbound**，需已启用并运行
+- 客户端使用的本地 DNS 解析器（Unbound 或 Dnsmasq），需已启用并运行
 - `make` 工具（OPNsense/FreeBSD 预装）
 - 防火墙能访问互联网（用于初次下载列表）
 
@@ -48,7 +48,7 @@ rm -rf /usr/local/etc/app-router
 
 ## 快速上手
 
-1. 在 **Services > AppRouter > General** 中启用插件，选择 DNS 解析器
+1. 在 **Services > AppRouter > General** 中启用插件
 2. *（可选）* 进入 **Custom Categories** 标签页，创建自定义分类（如公司 VPN 地址段）
 3. 进入 **Routing Rules** 标签页，添加规则：
    - **Source**：`any` 表示所有客户端，`192.168.1.0/24` 表示某个子网
@@ -126,20 +126,23 @@ CIDRs:   172.16.20.85
 
 AppRouter 按计划定时下载域名和 CIDR 列表。在 **List Sources** 标签页中配置源地址和更新间隔。点击 **Update Lists Now** 立即更新，点击 **Force Full Update** 跳过 ETag 缓存强制刷新。
 
-## DNS 模式
+## 域名如何变成路由
 
-### Dnsmasq (ipset) — 推荐
+基于域名的分类实际按 IP 匹配，IP 从 DNS 响应中学习：
 
-- 利用 Dnsmasq 原生 `ipset` 指令，在 DNS 查询时直接将域名解析结果写入 pf 表
-- 配置文件生成在 `/usr/local/etc/app-router/dnsmasq.d/`
-- 效率最高：零延迟 IP 捕获
+- `dns_watcher.py` 在规则所用接口及 WireGuard 接口上嗅探防火墙发给客户端的 DNS 响应（tcpdump，仅出方向）
+- 命中域名（含子域名）的 A 记录 IP 写入对应分类的 pf 表
+- 每 5 分钟通过 `drill` 主动解析预填充
+- 学到的 IP 若连续 **Learned IP Expiry** 小时（默认 24，`0` = 永不过期）没有再出现在 DNS 响应中就会被移除，避免轮换/共享的 CDN IP 越积越多导致误分流
+- Unbound、Dnsmasq 均可；域名-表映射文件位于 `/usr/local/etc/app-router/unbound.d/`
 
-### Unbound（DNS 嗅探）
+**China Mainland IPs (CIDR list)** 是按 IP 匹配的分类：China CIDR 列表（chnroutes2）中的所有网段都会走该规则，不依赖 DNS。"国内 app 走回国出口"场景下这是最稳的方式，可再配合应用分类覆盖部署在海外的服务。
 
-- `dns_watcher.py` 守护进程通过 tcpdump 在 LAN 接口嗅探 DNS 响应
-- 解析 A 记录并通过 pfctl 将 IP 写入 pf 表
-- 每 5 分钟通过 `drill` 主动解析作为补充
-- 域名-表映射文件位于 `/usr/local/etc/app-router/unbound.d/`
+### 已知限制
+
+- 只能看到经由防火墙、走 UDP 53 端口的明文 DNS。客户端使用 DoH/DoT（浏览器"安全 DNS"、iCloud 专用代理）或其他解析器时，域名分类会失效，如有依赖请重定向或屏蔽这类流量。
+- 仅 IPv4：AAAA 记录被忽略、规则为 `inet`，双栈客户端可能通过 IPv6 绕过规则。
+- 新 DNS 响应后的第一条连接可能仍走默认网关；插件会清除新 IP 的已有状态，让客户端重连后走规则。
 
 ## 验证
 
