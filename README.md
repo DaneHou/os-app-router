@@ -2,14 +2,14 @@
 
 English | [中文](README_CN.md)
 
-Route traffic from specific LAN clients through designated gateways based on domain/CIDR categories. For example, route all Chinese video streaming through WAN2 while everything else goes through WAN1 — or route corporate VPN traffic through a company gateway while keeping personal traffic on the main WAN.
+Route traffic from specific LAN clients through designated gateways based on domain/CIDR categories. For example, route Chinese apps and all mainland China IPs through a China exit while everything else goes through the main WAN — or route work traffic through a VPN gateway while keeping personal traffic on the main WAN.
 
 ## Features
 
 - **Built-in Categories**: Curated domain lists for Chinese video, social, shopping, music, and gaming platforms
 - **Custom Categories**: Define your own named groups of domains and static CIDRs (e.g., company IP ranges) and use them in routing rules
-- **DNS Sniffer**: Real-time capture of DNS responses via tcpdump for reliable CDN IP detection
-- **CIDR List Support**: Static IP range routing using community-maintained lists (chnroutes2, etc.)
+- **DNS Sniffer**: Real-time capture of DNS responses via tcpdump for reliable CDN IP detection, with automatic expiry of IPs that are no longer handed out
+- **China IP Category**: Route every mainland China network (chnroutes2) through a gateway — no DNS involved
 - **Per-client Rules**: Apply routing to specific LAN IPs/subnets, or to all traffic (`any`)
 - **Custom Domains**: Add per-rule domains beyond built-in categories — subdomains auto-matched
 - **Smart Gateway**: Automatic gateway selection with connectivity probing and priority-based fallback
@@ -19,7 +19,7 @@ Route traffic from specific LAN clients through designated gateways based on dom
 
 ## Requirements
 
-- OPNsense 23.7 or later
+- OPNsense 23.7 or later (UI checked in CI against the latest stable branch and master; verified on 26.7)
 - A local DNS resolver (Unbound or Dnsmasq) that clients use — must be enabled and running
 - `make` utility (pre-installed on OPNsense/FreeBSD)
 - Internet access from the firewall (for initial list download)
@@ -32,6 +32,14 @@ git clone https://github.com/DaneHou/os-app-router.git /tmp/os-app-router
 cd /tmp/os-app-router
 make install
 ```
+
+## Upgrade
+
+```bash
+cd /tmp/os-app-router && git pull && make install
+```
+
+Then open **Services > AppRouter** and click **Apply** so the runtime config is regenerated.
 
 ## Uninstall
 
@@ -52,7 +60,7 @@ rm -rf /usr/local/etc/app-router
 2. *(Optional)* Go to **Custom Categories** to define private domain/IP groups (e.g., company VPN ranges)
 3. Go to **Routing Rules** and add a rule:
    - **Source**: `any` for all clients, or `192.168.1.0/24` for a subnet
-   - **App Categories**: Select built-in or custom categories
+   - **App Categories**: Select built-in or custom categories, or **China Mainland IPs (CIDR list)**
    - **Gateway**: Target gateway for matched traffic
 4. Click **Save**, then **Apply** — this starts the service automatically
 5. Go to **List Sources** and click **Update Lists Now** to download the latest domain/CIDR data
@@ -73,6 +81,15 @@ Each rule routes traffic from a source (LAN clients) to a gateway based on categ
 | Gateway | Target gateway — select multiple to enable Smart Gateway |
 | Smart Gateway | Enable automatic gateway probing and fallback (requires 2+ gateways) |
 
+### General Settings
+
+| Field | Description |
+|-------|-------------|
+| Enable AppRouter | Master switch |
+| List Update Interval | Hourly, daily or weekly list refresh |
+| Learned IP Expiry (hours) | Remove IPs learned from DNS when no answer has returned them for this long (default 24, `0` = never) |
+| Table Prefix | Prefix for pf table names (default `approuter`) |
+
 **Source examples:**
 ```
 any                              — all LAN clients
@@ -88,24 +105,23 @@ Custom categories let you define named groups of domains and static CIDRs that a
 **Creating a category:**
 1. Go to **Custom Categories** tab → **Add Category**
 2. Fill in:
-   - **Slug**: Short ID used internally (lowercase, letters/numbers/underscores, e.g. `ba_work`)
+   - **Slug**: Short ID used internally (lowercase, letters/numbers/underscores, e.g. `work_vpn`; `china_all` is reserved)
    - **Label**: Display name shown in the rule editor
-   - **Domains**: One domain per line or comma-separated; subdomains are auto-matched (e.g. `amazonaws-us-gov.com` catches `s3.us-gov-west-1.amazonaws-us-gov.com`)
-   - **Static CIDRs**: IP ranges or host IPs routed directly (e.g. `172.16.20.85`, `10.0.0.0/24`)
+   - **Domains**: One domain per line or comma-separated; subdomains are auto-matched (e.g. `example.com` catches `cdn.eu-west-1.example.com`)
+   - **Static CIDRs**: IP ranges or host IPs routed directly (e.g. `203.0.113.10`, `198.51.100.0/24`); never expired
 3. Click **Save**, then **Apply**
 
-**Example — Company Traffic:**
+**Example — Work Traffic:**
 ```
-Slug:    ba_work
-Label:   BA Work
-Domains: atlassian.net
-         confluence.example.com
-         amazonaws-us-gov.com
-CIDRs:   172.16.20.85
-         172.16.16.0/24
+Slug:    work_vpn
+Label:   Work VPN
+Domains: corp.example.com
+         intranet.example.net
+CIDRs:   203.0.113.10
+         198.51.100.0/24
 ```
 
-Then create a routing rule using `BA Work` as the category and your VPN gateway as the target.
+Then create a routing rule using `Work VPN` as the category and your VPN gateway as the target.
 
 ### Smart Gateway
 
@@ -115,10 +131,13 @@ Smart Gateway enables automatic failover between multiple gateways by probing co
 1. In a routing rule, select **two or more gateways** (priority order top → bottom)
 2. Enable the **Smart Gateway** toggle
 3. Choose a probe method:
-   - `connect_only` — TCP connect test (fast, no HTTP overhead)
-   - `http_2xx` — Requires HTTP 200–299 response
-   - `body_match` — Requires a pattern in the HTTP response body
-4. Set **Probe URL** (e.g. `https://www.google.com`) and **Probe Interval** (seconds)
+   - `connect_only` — TCP/TLS connect test (fast)
+   - `status_code` — HTTP 2xx/3xx passes; 403/451 count as geo-blocked
+   - `body_match` — **Probe Pattern** (regex) matched in the body means blocked
+   - `latency` — use the fastest passing gateway
+4. Set **Probe URL** (`http://` or `https://` only, default `https://www.google.com`) and **Probe Interval** (30–3600 seconds)
+
+A gateway switches after 3 consistent probe results, with at most one switch per 5 minutes.
 
 The first gateway in priority order that passes the probe becomes active. If it fails, the next gateway is tried. The last gateway always acts as fallback.
 
@@ -150,8 +169,9 @@ Domain based categories are matched by IP address, learned from DNS:
 # Check pf tables are populated
 pfctl -t approuter_video -T show
 
-# Check a custom category table
-pfctl -t approuter_ba_work -T show
+# Check a custom category / the China IP table
+pfctl -t approuter_work_vpn -T show
+pfctl -t approuter_china_all -T show | wc -l
 
 # Check routing rules are installed
 pfctl -sr | grep approuter
@@ -187,14 +207,15 @@ If you added CIDRs to a Custom Category but traffic still doesn't route:
 
 ### Unrelated sites blocked or getting geo-errors
 
-If a commercial site (e.g. a US retailer) gives geo-block errors only on some devices:
+If a site that isn't in any category (e.g. a US retailer) is routed through the rule gateway, it most likely shares CDN IPs with a categorized app:
 
-- This was previously caused by broad `/24` subnet blocks being added to category tables when CDN providers shared IP ranges across sites. This behavior has been removed — AppRouter now only adds specific resolved IPs.
-- If you still see stale `/24` entries in a table, click **Apply** to flush and repopulate it cleanly.
+- Learned IPs expire after **Learned IP Expiry** hours without a fresh DNS answer — lower it (e.g. 6) if this happens often.
+- Check which table holds the address: `pfctl -t approuter_video -T test <ip>`
+- A **China Mainland IPs** rule routes by destination network: sites hosted in mainland China always follow it.
 
 ### China CIDR list not loading
 
-The default source is `misakaio/chnroutes2`. If the configured URL fails, the plugin falls back to the built-in default URL. If both fail:
+The list is only used by rules with the **China Mainland IPs (CIDR list)** category. The default source is `misakaio/chnroutes2`. If the configured URL fails, the plugin falls back to the built-in default URL. If both fail:
 1. Check **Status** tab for error messages in logs
 2. Update the CIDR URL in **List Sources** (the old `ruijzhan/chnroute` URL is no longer available)
 3. Run **Force Full Update**
@@ -205,15 +226,22 @@ The default source is `misakaio/chnroutes2`. If the configured URL fails, the pl
 2. Check syslog: `grep approuter /var/log/system/latest.log`
 3. Check DNS watcher log: `cat /var/log/approuter_dns_watcher.log`
 4. Verify Unbound/Dnsmasq is running
+5. For a single domain end to end: `sh /usr/local/opnsense/scripts/OPNsense/Approuter/diagnose.sh example.com`
 
 ## Data Sources
 
 | Source | Content | URL |
 |--------|---------|-----|
-| dnsmasq-china-list | Chinese domains | github.com/felixonmars/dnsmasq-china-list |
+| dnsmasq-china-list | Chinese domains (downloaded, currently informational) | github.com/felixonmars/dnsmasq-china-list |
 | chnroutes2 | China IPv4 CIDRs | github.com/misakaio/chnroutes2 |
 | v2fly/domain-list-community | App-specific domains | github.com/v2fly/domain-list-community |
 | Built-in categories | Curated app domains | Bundled with plugin |
+
+## Security Notes
+
+- Only DNS responses the firewall *sends* are trusted (`tcpdump -Q out`), so LAN hosts cannot inject addresses with forged packets.
+- Domains from remote lists and user input are validated before they are written anywhere; the runtime config is rendered with JSON escaping.
+- Probe URLs are restricted to http/https; temporary files use private `mktemp` paths.
 
 ## Development
 
@@ -222,8 +250,14 @@ make install          # Install + activate on OPNsense host
 make install-plugin   # Copy files only (no activation)
 make activate         # Flush caches, restart services
 make lint             # Check Python syntax and XML validity
+make test             # lint + pytest (needs pytest and jinja2)
 make clean            # Remove __pycache__ and .pyc files
+
+# UI compatibility check against an OPNsense core checkout (needs the phalcon PHP extension)
+php tests/ui/render.php src /path/to/opnsense-core/src
 ```
+
+CI (`.github/workflows/ci.yml`) runs the unit tests and renders the UI against OPNsense core master and the latest stable branch on every push, plus weekly, so upstream template changes are caught before a firmware upgrade.
 
 ### File Structure
 
@@ -232,17 +266,23 @@ src/
 ├── etc/inc/plugins.inc.d/
 │   └── approuter.inc              # pf tables, rules, services, cron hooks
 ├── opnsense/mvc/app/
-│   ├── controllers/.../Api/
-│   │   ├── SettingsController.php  # CRUD for rules, settings, categories
-│   │   └── ServiceController.php   # reconfigure, status, start/stop/restart
+│   ├── controllers/.../Approuter/
+│   │   ├── Api/SettingsController.php  # CRUD for rules, settings, categories
+│   │   ├── Api/ServiceController.php   # reconfigure, status, start/stop/restart
+│   │   └── forms/                      # general, lists and rule dialog form definitions
 │   ├── models/.../Approuter.xml    # XML schema (settings, rules, lists, custom categories)
 │   └── views/.../index.volt        # Single-page UI
-└── opnsense/scripts/.../Approuter/
-    ├── list_updater.py             # Fetch/process remote lists, generate DNS configs
-    ├── dns_watcher.py              # DNS sniffer daemon (tcpdump-based)
-    ├── geo_prober.py               # Smart gateway connectivity prober
-    ├── table_manager.sh            # pfctl table operations
-    └── app_categories.json         # Built-in domain categories
+├── opnsense/scripts/.../Approuter/
+│   ├── list_updater.py             # Fetch/process remote lists, write domain mappings and CIDR files
+│   ├── dns_watcher.py              # DNS sniffer daemon (tcpdump-based), learned IP expiry
+│   ├── geo_prober.py               # Smart gateway connectivity prober
+│   ├── table_manager.sh            # pfctl table operations
+│   ├── diagnose.sh                 # Manual troubleshooting helper (sh diagnose.sh <domain>)
+│   └── app_categories.json         # Built-in domain categories
+└── opnsense/service/templates/.../approuter.conf  # config.json template (configd)
+tests/
+├── test_*.py                       # pytest: list parsing, expiry, template rendering
+└── ui/render.php                   # renders the page against an OPNsense core checkout
 ```
 
 ## License

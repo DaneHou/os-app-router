@@ -37,7 +37,8 @@ Web UI (Volt/jQuery) → REST API (PHP Controllers) → configd actions → Pyth
 
 **PHP MVC Layer** (`src/opnsense/mvc/app/`):
 - `models/OPNsense/Approuter/Approuter.xml` — XML schema defining settings, rules, and lists. Central config structure.
-- `controllers/.../Api/SettingsController.php` — CRUD for rules/settings. Extends `ApiMutableModelControllerBase`. Augments getRule with gateway dropdown and category multi-select from `app_categories.json`.
+- `controllers/.../Api/SettingsController.php` — CRUD for rules/settings. Extends `ApiMutableModelControllerBase`. Augments getRule with gateway dropdown and category multi-select (`china_all` + `app_categories.json` + custom categories).
+- `controllers/.../forms/*.xml` — `general`, `lists` and `dialogRule` forms, loaded with `getForm()` in `IndexController`. Dialogs must use a form XML: since OPNsense 26.7 `base_dialog.volt` expects the `getForm()` structure (`{sections: [...]}`); an inline field list crashes the page.
 - `controllers/.../Api/ServiceController.php` — reconfigure (Apply), updateLists, forceUpdate, status/detailStatus, start/stop/restart. Extends `ApiMutableServiceControllerBase`. Custom `statusAction` checks dns_watcher via configd and returns `widget` section for `updateServiceControlUI()`.
 - `views/.../index.volt` — Single-page UI with Bootstrap/jQuery, uses OPNsense bootgrid for rule table.
 
@@ -48,8 +49,9 @@ Web UI (Volt/jQuery) → REST API (PHP Controllers) → configd actions → Pyth
 - `approuter_syslog()` — Registers log facilities
 
 **Backend Scripts** (`src/opnsense/scripts/OPNsense/Approuter/`):
-- `list_updater.py` — Fetches remote domain/CIDR lists (with fallback URLs), v2fly domains, aggregates CIDRs, generates DNS configs, writes pf table files
-- `dns_watcher.py` — Daemon sniffing DNS responses via tcpdump on LAN interfaces, adds resolved IPs to pf tables. Also runs periodic active resolution via `drill` as fallback.
+- `list_updater.py` — Fetches remote domain/CIDR lists (with fallback URLs) and v2fly domains, validates domains, aggregates CIDRs, writes domain mapping files (`unbound.d/`) and CIDR files (`cidrs/`). `generate_dns` (run on Apply) reuses the cached merged v2fly domains from `domains/`.
+- `dns_watcher.py` — Daemon sniffing outbound DNS responses via tcpdump, adds resolved IPs to pf tables and expires stale ones. Also runs periodic active resolution via `drill` as fallback.
+- `geo_prober.py` — Smart gateway prober (curl per gateway interface), fills/flushes `_gwN` tables.
 - `table_manager.sh` — Shell wrapper for `pfctl` table operations
 - `app_categories.json` — Built-in domain definitions (categories → apps → domains)
 
@@ -57,7 +59,7 @@ Web UI (Volt/jQuery) → REST API (PHP Controllers) → configd actions → Pyth
 - Maps API calls to script invocations. INI format. Each action defines command, parameters, message type.
 
 **Config Template** (`src/opnsense/service/templates/OPNsense/Approuter/approuter.conf`):
-- Jinja2 template generating runtime `/usr/local/etc/app-router/config.json` from OPNsense config.xml
+- Jinja2 template generating runtime `/usr/local/etc/app-router/config.json` from OPNsense config.xml. Every string value must go through `|tojson`.
 
 ### Key API Endpoints
 

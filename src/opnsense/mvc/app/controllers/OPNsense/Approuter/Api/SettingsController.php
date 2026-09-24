@@ -265,7 +265,7 @@ class SettingsController extends ApiMutableModelControllerBase
         $seen = [];
 
         // Primary: configd 'interface gateways status' — returns all gateways
-        // including dynamic/auto-created ones (e.g. FRP_GW from tunnel interfaces)
+        // including dynamic/auto-created ones (e.g. gateways of tunnel interfaces)
         try {
             $backend = new Backend();
             $response = trim($backend->configdRun('interface gateways status'));
