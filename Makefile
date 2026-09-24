@@ -55,6 +55,8 @@ install-plugin:
 		$(PLUGIN_MVC)/controllers/OPNsense/Approuter/forms/general.xml
 	@cp src/opnsense/mvc/app/controllers/OPNsense/Approuter/forms/lists.xml \
 		$(PLUGIN_MVC)/controllers/OPNsense/Approuter/forms/lists.xml
+	@cp src/opnsense/mvc/app/controllers/OPNsense/Approuter/forms/dialogRule.xml \
+		$(PLUGIN_MVC)/controllers/OPNsense/Approuter/forms/dialogRule.xml
 	@# MVC Views
 	@mkdir -p $(PLUGIN_MVC)/views/OPNsense/Approuter
 	@cp src/opnsense/mvc/app/views/OPNsense/Approuter/index.volt \

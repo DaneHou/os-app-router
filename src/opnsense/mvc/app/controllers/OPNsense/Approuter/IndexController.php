@@ -35,5 +35,6 @@ class IndexController extends \OPNsense\Base\IndexController
         $this->view->pick('OPNsense/Approuter/index');
         $this->view->generalForm = $this->getForm('general');
         $this->view->listsForm = $this->getForm('lists');
+        $this->view->formDialogRule = $this->getForm('dialogRule');
     }
 }

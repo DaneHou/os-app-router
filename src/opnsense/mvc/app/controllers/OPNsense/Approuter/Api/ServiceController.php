@@ -312,7 +312,7 @@ class ServiceController extends ApiMutableServiceControllerBase
         $smartGwStatus = [];
         foreach ($mdl->rules->rule->iterateItems() as $uuid => $rule) {
             if ((string)$rule->enabled === '1' && (string)$rule->smartGateway === '1') {
-                $gateways = array_filter(array_map('trim', explode(',', (string)$rule->gateway)));
+                $gateways = array_values(array_filter(array_map('trim', explode(',', (string)$rule->gateway))));
                 if (count($gateways) > 1) {
                     $ruleStatus = [
                         'description' => (string)$rule->description ?: 'Rule ' . substr(md5($uuid), 0, 8),
@@ -323,7 +323,8 @@ class ServiceController extends ApiMutableServiceControllerBase
                     ];
 
                     // Check which _gwN tables have entries to determine active gateway
-                    $categories = array_filter(array_map('trim', explode(',', (string)$rule->categories)));
+                    // array_values: array_filter keeps keys, so [0] may not exist
+                    $categories = array_values(array_filter(array_map('trim', explode(',', (string)$rule->categories))));
                     if (!empty($categories)) {
                         $firstCat = $categories[0];
                         $catTable = $tablePrefix . '_' . str_replace('.', '_', $firstCat);
