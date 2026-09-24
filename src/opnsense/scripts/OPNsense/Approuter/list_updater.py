@@ -18,6 +18,7 @@ import urllib.request
 import urllib.error
 import syslog
 import hashlib
+import shutil
 from pathlib import Path
 
 # Force IPv4 for all network operations (workaround for broken IPv6 on some systems)
@@ -29,7 +30,8 @@ socket.getaddrinfo = _getaddrinfo_ipv4
 BASE_DIR = "/usr/local/etc/app-router"
 DOMAINS_DIR = os.path.join(BASE_DIR, "domains")
 CIDRS_DIR = os.path.join(BASE_DIR, "cidrs")
-DNSMASQ_DIR = os.path.join(BASE_DIR, "dnsmasq.d")
+# Legacy output dir: dnsmasq never loaded these files, removed on next run
+LEGACY_DNSMASQ_DIR = os.path.join(BASE_DIR, "dnsmasq.d")
 UNBOUND_DIR = os.path.join(BASE_DIR, "unbound.d")
 CATEGORIES_FILE = "/usr/local/opnsense/scripts/OPNsense/Approuter/app_categories.json"
 CONFIG_FILE = os.path.join(BASE_DIR, "config.json")
@@ -39,19 +41,29 @@ V2FLY_BASE_URL = "https://raw.githubusercontent.com/v2fly/domain-list-community/
 
 # Valid domain pattern: optional wildcard prefix, then RFC-1123 labels
 _DOMAIN_RE = re.compile(r'^(\*\.)?[a-zA-Z0-9]([a-zA-Z0-9\-\.]*[a-zA-Z0-9])?$')
+# Custom category slugs end up in file names and pf table names
+_SLUG_RE = re.compile(r'^[a-z][a-z0-9_]{0,30}$')
 
-DEFAULT_SOURCES = {
-    "china_domains": {
-        "url": "https://raw.githubusercontent.com/felixonmars/dnsmasq-china-list/master/accelerated-domains.china.conf",
-        "type": "dnsmasq",
-        "description": "China accelerated domains (felixonmars)"
-    },
-    "china_cidrs_v4": {
-        "url": "https://raw.githubusercontent.com/misakaio/chnroutes2/master/chnroutes.txt",
-        "type": "cidr",
-        "description": "China IPv4 CIDR blocks (chnroutes2)"
-    }
-}
+
+def valid_domains(domains, source="list"):
+    """Keep only syntactically valid domain names.
+
+    Domains end up in the mapping files dns_watcher matches DNS answers
+    against, so anything else (slashes, whitespace, ...) coming from a
+    remote list must never make it through.
+    """
+    result = set()
+    dropped = 0
+    for d in domains:
+        d = d.strip().lower().rstrip('.')
+        if d and len(d) <= 253 and _DOMAIN_RE.match(d):
+            result.add(d)
+        elif d:
+            dropped += 1
+    if dropped:
+        log(f"Dropped {dropped} invalid domain entries from {source}", syslog.LOG_WARNING)
+    return result
+
 
 
 def log(msg, level=syslog.LOG_INFO):
@@ -61,8 +73,9 @@ def log(msg, level=syslog.LOG_INFO):
 
 
 def ensure_dirs():
-    for d in [BASE_DIR, DOMAINS_DIR, CIDRS_DIR, DNSMASQ_DIR, UNBOUND_DIR]:
+    for d in [BASE_DIR, DOMAINS_DIR, CIDRS_DIR, UNBOUND_DIR]:
         os.makedirs(d, mode=0o755, exist_ok=True)
+    shutil.rmtree(LEGACY_DNSMASQ_DIR, ignore_errors=True)
 
 
 def load_config():
@@ -122,7 +135,7 @@ def parse_dnsmasq_domains(content):
             parts = line.split("/")
             if len(parts) >= 3 and parts[1]:
                 domains.add(parts[1].lower())
-    return domains
+    return valid_domains(domains, "dnsmasq list")
 
 
 def parse_cidr_list(content):
@@ -166,8 +179,9 @@ def fetch_v2fly_domains(name, depth=0):
             continue
         # Handle include directives
         if line.startswith("include:"):
-            inc_name = line.split(":")[1].strip().split()[0]
-            domains.update(fetch_v2fly_domains(inc_name, depth + 1))
+            inc_parts = line.split(":", 1)[1].split()
+            if inc_parts and re.match(r'^[a-z0-9!_\-]+$', inc_parts[0]):
+                domains.update(fetch_v2fly_domains(inc_parts[0], depth + 1))
             continue
         # Skip keyword and regexp entries
         if line.startswith("keyword:") or line.startswith("regexp:"):
@@ -183,7 +197,7 @@ def fetch_v2fly_domains(name, depth=0):
         if entry:
             domains.add(entry)
 
-    return domains
+    return valid_domains(domains, f"v2fly/{name}")
 
 
 def update_v2fly_domains(categories, state):
@@ -247,8 +261,11 @@ def write_if_changed(filepath, content):
             old_hash = hashlib.sha256(f.read().encode()).hexdigest()
         if old_hash == new_hash:
             return False
-    with open(filepath, "w") as f:
+    # write + rename so readers (dns_watcher, pfctl) never see a partial file
+    tmp_path = f"{filepath}.tmp"
+    with open(tmp_path, "w") as f:
         f.write(content)
+    os.replace(tmp_path, filepath)
     return True
 
 
@@ -263,45 +280,6 @@ def get_all_domains_for_category(cat_data):
         domains.update(cat_data["domains"])
     return domains
 
-
-def generate_dnsmasq_conf(categories, table_prefix="approuter", v2fly_merged=None):
-    """Generate Dnsmasq ipset config snippets per category and per app."""
-    v2fly_merged = v2fly_merged or {}
-    for cat_id, cat_data in categories.items():
-        # Category-level config (all apps combined)
-        all_domains = get_all_domains_for_category(cat_data)
-        # Merge v2fly domains into category level
-        if "apps" in cat_data:
-            for app_id in cat_data["apps"]:
-                key = f"{cat_id}.{app_id}"
-                if key in v2fly_merged:
-                    all_domains.update(v2fly_merged[key])
-        lines = []
-        table_name = f"{table_prefix}_{cat_id}"
-        for domain in sorted(all_domains):
-            lines.append(f"ipset=/{domain}/{table_name}")
-        content = f"# AppRouter: {cat_data.get('name', cat_id)}\n"
-        content += f"# Auto-generated - do not edit\n"
-        content += "\n".join(lines) + "\n"
-        filepath = os.path.join(DNSMASQ_DIR, f"approuter_{cat_id}.conf")
-        write_if_changed(filepath, content)
-
-        # Per-app configs
-        if "apps" in cat_data:
-            for app_id, app_data in cat_data["apps"].items():
-                key = f"{cat_id}.{app_id}"
-                app_domains = v2fly_merged.get(key, set(app_data.get("domains", [])))
-                app_table = f"{table_prefix}_{cat_id}_{app_id}"
-                app_lines = []
-                for domain in sorted(app_domains):
-                    app_lines.append(f"ipset=/{domain}/{app_table}")
-                app_content = f"# AppRouter: {app_data.get('label', app_id)}\n"
-                app_content += f"# Auto-generated - do not edit\n"
-                app_content += "\n".join(app_lines) + "\n"
-                app_filepath = os.path.join(DNSMASQ_DIR, f"approuter_{cat_id}_{app_id}.conf")
-                write_if_changed(app_filepath, app_content)
-
-    log(f"Generated Dnsmasq configs for {len(categories)} categories")
 
 
 def generate_unbound_conf(categories, table_prefix="approuter", v2fly_merged=None, config=None):
@@ -351,7 +329,7 @@ def generate_custom_domain_mappings(config, table_prefix="approuter"):
         custom_str = rule.get("custom_domains", "").strip()
         if not custom_str:
             continue
-        domains = [d.strip().lower() for d in custom_str.split(",") if d.strip()]
+        domains = valid_domains(custom_str.split(","), "rule custom domains")
         if not domains:
             continue
         # Match PHP hook: substr(md5(uuid), 0, 8)
@@ -377,13 +355,16 @@ def generate_custom_domain_mappings(config, table_prefix="approuter"):
 
 
 def process_custom_categories(config, table_prefix="approuter"):
-    """Generate dnsmasq/unbound configs and cidr files for user-defined custom categories."""
+    """Generate domain mapping and cidr files for user-defined custom categories."""
     custom_cats = config.get("custom_categories", [])
     valid_slugs = set()
 
     for cat in custom_cats:
         slug = cat.get("slug", "").strip()
         if not slug:
+            continue
+        if not _SLUG_RE.match(slug) or slug == "china_all":
+            log(f"Skipping custom category with invalid slug: {slug!r}", syslog.LOG_WARNING)
             continue
 
         # Normalise domains: split on comma or newline, strip whitespace, validate
@@ -419,26 +400,12 @@ def process_custom_categories(config, table_prefix="approuter"):
         cidr_path = os.path.join(CIDRS_DIR, f"{slug}.txt")
         write_if_changed(cidr_path, "\n".join(aggregated) + "\n" if aggregated else "")
 
-        # Dnsmasq config
-        if domains:
-            lines = [f"# AppRouter custom category: {cat.get('label', slug)}",
-                     "# Auto-generated - do not edit"]
-            for domain in domains:
-                lines.append(f"ipset=/{domain}/{table_name}")
-            dnsmasq_path = os.path.join(DNSMASQ_DIR, f"approuter_usercat_{slug}.conf")
-            write_if_changed(dnsmasq_path, "\n".join(lines) + "\n")
-
         # Unbound JSON mapping
         mapping = {"table": table_name, "domains": domains}
         unbound_path = os.path.join(UNBOUND_DIR, f"approuter_usercat_{slug}.json")
         write_if_changed(unbound_path, json.dumps(mapping, indent=2) + "\n")
 
     # Clean orphaned usercat files for deleted categories
-    for f in Path(DNSMASQ_DIR).glob("approuter_usercat_*.conf"):
-        slug = f.stem.replace("approuter_usercat_", "")
-        if slug not in valid_slugs:
-            f.unlink()
-            log(f"Removed orphaned dnsmasq file: {f.name}")
     for f in Path(UNBOUND_DIR).glob("approuter_usercat_*.json"):
         slug = f.stem.replace("approuter_usercat_", "")
         if slug not in valid_slugs:
@@ -447,39 +414,6 @@ def process_custom_categories(config, table_prefix="approuter"):
 
     if valid_slugs:
         log(f"Processed {len(valid_slugs)} custom categories: {', '.join(sorted(valid_slugs))}")
-
-
-def generate_dnsmasq_custom_conf(config, table_prefix="approuter"):
-    """Generate Dnsmasq ipset config for per-rule custom domains."""
-    rules = config.get("rules", [])
-    valid_files = set()
-    custom_count = 0
-    for rule in rules:
-        custom_str = rule.get("custom_domains", "").strip()
-        if not custom_str:
-            continue
-        domains = [d.strip().lower() for d in custom_str.split(",") if d.strip()]
-        if not domains:
-            continue
-        rule_uuid = rule.get("uuid", "")
-        rule_id = hashlib.md5(rule_uuid.encode()).hexdigest()[:8]
-        table_name = f"{table_prefix}_custom_{rule_id}"
-        lines = [f"# AppRouter: custom domains for rule {rule_id}",
-                 "# Auto-generated - do not edit"]
-        for domain in sorted(domains):
-            lines.append(f"ipset=/{domain}/{table_name}")
-        filename = f"approuter_custom_{rule_id}.conf"
-        filepath = os.path.join(DNSMASQ_DIR, filename)
-        write_if_changed(filepath, "\n".join(lines) + "\n")
-        valid_files.add(filename)
-        custom_count += 1
-    # Clean orphaned custom dnsmasq config files
-    for f in Path(DNSMASQ_DIR).glob("approuter_custom_*.conf"):
-        if f.name not in valid_files:
-            f.unlink()
-            log(f"Removed orphaned file: {f.name}")
-    if custom_count:
-        log(f"Generated {custom_count} Dnsmasq custom domain configs")
 
 
 def update_remote_lists(config, state):
@@ -547,7 +481,7 @@ def update_remote_lists(config, state):
                     for line in content.strip().split("\n"):
                         line = line.strip()
                         if line and not line.startswith("#"):
-                            china_domains.add(line.lower())
+                            china_domains.update(valid_domains([line], f"custom source {idx}"))
                 elif stype == "cidr":
                     china_cidrs.update(parse_cidr_list(content))
                 updated = True
@@ -595,6 +529,56 @@ def update_tables():
     signal_dns_watcher()
 
 
+def load_cached_v2fly(categories):
+    """Merged per-app domain sets written by the last full update.
+
+    generate_dns runs on every Apply without network access; rebuilding the
+    mappings from app_categories.json alone would silently drop the v2fly
+    domains until the next scheduled update.
+    """
+    merged = {}
+    for cat_id, cat_data in categories.items():
+        for app_id, app_data in cat_data.get("apps", {}).items():
+            if not app_data.get("v2fly"):
+                continue
+            key = f"{cat_id}.{app_id}"
+            domains = set(app_data.get("domains", []))
+            try:
+                with open(os.path.join(DOMAINS_DIR, f"{key}.txt")) as f:
+                    domains.update(valid_domains(f.read().split(), f"cache {key}"))
+            except OSError:
+                pass
+            merged[key] = domains
+    return merged
+
+
+def write_category_domain_files(categories, v2fly_merged):
+    for cat_id, cat_data in categories.items():
+        all_domains = get_all_domains_for_category(cat_data)
+        for app_id, app_data in cat_data.get("apps", {}).items():
+            key = f"{cat_id}.{app_id}"
+            app_domains = v2fly_merged.get(key, set(app_data.get("domains", [])))
+            write_domain_file(key, app_domains)
+            all_domains.update(app_domains)
+        write_domain_file(cat_id, all_domains)
+
+
+def full_update(config, state, categories, prefix, force=False):
+    if force:
+        for key in list(state.keys()):
+            if key.startswith("etag_"):
+                del state[key]
+    updated = update_remote_lists(config, state)
+    v2fly_merged = update_v2fly_domains(categories, state)
+    write_category_domain_files(categories, v2fly_merged)
+    generate_unbound_conf(categories, prefix, v2fly_merged=v2fly_merged, config=config)
+    process_custom_categories(config, prefix)
+    state["last_full_update"] = int(time.time())
+    save_state(state)
+    if force or updated or v2fly_merged:
+        update_tables()
+
+
 def main():
     action = sys.argv[1] if len(sys.argv) > 1 else "update"
 
@@ -602,67 +586,27 @@ def main():
     config = load_config()
     state = load_state()
     categories = load_categories()
+    # Must match the prefix the PHP firewall hook uses for pf table names
+    prefix = config.get("table_prefix") or "approuter"
+    if not _SLUG_RE.match(prefix):
+        log(f"Invalid table_prefix {prefix!r}, using 'approuter'", syslog.LOG_WARNING)
+        prefix = "approuter"
 
-    if action == "update":
-        log("Starting list update")
-        updated = update_remote_lists(config, state)
-        # Fetch v2fly domains and merge into categories
-        v2fly_merged = update_v2fly_domains(categories, state)
-        for cat_id, cat_data in categories.items():
-            all_domains = get_all_domains_for_category(cat_data)
-            if "apps" in cat_data:
-                for app_id, app_data in cat_data["apps"].items():
-                    key = f"{cat_id}.{app_id}"
-                    app_domains = v2fly_merged.get(key, set(app_data.get("domains", [])))
-                    write_domain_file(key, app_domains)
-                    all_domains.update(app_domains)
-            write_domain_file(cat_id, all_domains)
-        generate_dnsmasq_conf(categories, v2fly_merged=v2fly_merged)
-        generate_dnsmasq_custom_conf(config)
-        generate_unbound_conf(categories, v2fly_merged=v2fly_merged, config=config)
-        process_custom_categories(config)
-        state["last_full_update"] = int(time.time())
-        save_state(state)
-        if updated or v2fly_merged:
-            update_tables()
+    if action in ("update", "force"):
+        log(f"Starting {'forced ' if action == 'force' else ''}list update")
+        full_update(config, state, categories, prefix, force=(action == "force"))
         log("List update completed")
 
     elif action == "generate_dns":
-        generate_dnsmasq_conf(categories)
-        generate_dnsmasq_custom_conf(config)
-        generate_unbound_conf(categories, config=config)
-        process_custom_categories(config)
+        generate_unbound_conf(categories, prefix, v2fly_merged=load_cached_v2fly(categories),
+                              config=config)
+        process_custom_categories(config, prefix)
         signal_dns_watcher()
         log("DNS configs regenerated")
 
     elif action == "status":
         state["categories"] = {k: len(get_all_domains_for_category(v)) for k, v in categories.items()}
         print(json.dumps(state, indent=2))
-
-    elif action == "force":
-        log("Starting forced list update")
-        for key in list(state.keys()):
-            if key.startswith("etag_"):
-                del state[key]
-        update_remote_lists(config, state)
-        v2fly_merged = update_v2fly_domains(categories, state)
-        for cat_id, cat_data in categories.items():
-            all_domains = get_all_domains_for_category(cat_data)
-            if "apps" in cat_data:
-                for app_id, app_data in cat_data["apps"].items():
-                    key = f"{cat_id}.{app_id}"
-                    app_domains = v2fly_merged.get(key, set(app_data.get("domains", [])))
-                    write_domain_file(key, app_domains)
-                    all_domains.update(app_domains)
-            write_domain_file(cat_id, all_domains)
-        generate_dnsmasq_conf(categories, v2fly_merged=v2fly_merged)
-        generate_dnsmasq_custom_conf(config)
-        generate_unbound_conf(categories, v2fly_merged=v2fly_merged, config=config)
-        process_custom_categories(config)
-        state["last_full_update"] = int(time.time())
-        save_state(state)
-        update_tables()
-        log("Forced list update completed")
 
     else:
         print(f"Usage: {sys.argv[0]} [update|generate_dns|status|force]")

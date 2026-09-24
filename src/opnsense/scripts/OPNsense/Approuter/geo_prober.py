@@ -8,6 +8,7 @@ between gateways by populating/flushing pf _gwN tables.
 Designed to run as a foreground process under FreeBSD daemon(8).
 """
 
+import hashlib
 import json
 import os
 import re
@@ -15,9 +16,9 @@ import signal
 import subprocess
 import sys
 import syslog
+import tempfile
 import threading
 import time
-from pathlib import Path
 
 CONFIG_FILE = "/usr/local/etc/app-router/config.json"
 STATE_FILE = "/usr/local/etc/app-router/smart_gateway_state.json"
@@ -31,6 +32,11 @@ CURL = "/usr/local/bin/curl"
 DEBOUNCE_COUNT = 3
 # Minimum cooldown between switches (seconds)
 SWITCH_COOLDOWN = 300
+
+DEFAULT_PROBE_URL = "https://www.google.com"
+# Probe URLs are handed to curl as an argument: only allow plain http(s) URLs
+# so nothing can be interpreted as a curl option or a file:// / other scheme.
+PROBE_URL_RE = re.compile(r'^https?://[^\s"\'\\]+$', re.IGNORECASE)
 
 # Gateway interface cache
 gw_interface_cache = {}
@@ -88,19 +94,39 @@ def load_config():
         for cat in categories:
             base_tables.append(table_prefix + "_" + cat.replace(".", "_"))
         if custom_domains:
-            import hashlib
             uuid = rule.get("uuid", "")
             hash8 = hashlib.md5(uuid.encode()).hexdigest()[:8]
             base_tables.append(table_prefix + "_custom_" + hash8)
 
+        desc = rule.get("description", "")
+        probe_url = rule.get("probe_url", "") or DEFAULT_PROBE_URL
+        if not PROBE_URL_RE.match(probe_url):
+            log(f"Rule '{desc}': invalid probe URL {probe_url!r}, using {DEFAULT_PROBE_URL}",
+                syslog.LOG_WARNING)
+            probe_url = DEFAULT_PROBE_URL
+
+        # Compile once; an invalid regex used to kill the probe thread
+        probe_pattern = None
+        if rule.get("probe_pattern"):
+            try:
+                probe_pattern = re.compile(rule["probe_pattern"])
+            except re.error as e:
+                log(f"Rule '{desc}': invalid probe pattern ({e}), body match disabled",
+                    syslog.LOG_ERR)
+
+        try:
+            probe_interval = min(max(int(rule.get("probe_interval", 300)), 30), 3600)
+        except (TypeError, ValueError):
+            probe_interval = 300
+
         smart_rules.append({
-            "description": rule.get("description", ""),
+            "description": desc,
             "gateways": gateways,
             "base_tables": base_tables,
-            "probe_url": rule.get("probe_url", ""),
-            "probe_interval": rule.get("probe_interval", 300),
+            "probe_url": probe_url,
+            "probe_interval": probe_interval,
             "probe_method": rule.get("probe_method", "connect_only"),
-            "probe_pattern": rule.get("probe_pattern", ""),
+            "probe_pattern": probe_pattern,
         })
 
     return smart_rules
@@ -177,16 +203,13 @@ def probe_gateway(gw_name, probe_url, probe_method, probe_pattern):
     if not iface:
         return False, 0.0, f"no interface for {gw_name}"
 
-    if not probe_url:
-        # Default: TCP connect test to a well-known endpoint
-        probe_url = "https://www.google.com"
-
-    curl_base = [
+    curl_common = [
         CURL, "-s", "--interface", iface,
+        "--proto", "=http,https", "--proto-redir", "=http,https",
         "--connect-timeout", "10",
         "--max-time", "15",
-        "-o", "/dev/null",
     ]
+    curl_base = curl_common + ["-o", "/dev/null"]
 
     try:
         if probe_method == "connect_only":
@@ -219,20 +242,15 @@ def probe_gateway(gw_name, probe_url, probe_method, probe_pattern):
 
         elif probe_method == "body_match":
             # Need actual body content
-            curl_body = [
-                CURL, "-s", "--interface", iface,
-                "--connect-timeout", "10",
-                "--max-time", "15",
-                probe_url,
-            ]
+            curl_body = curl_common + ["--max-filesize", "5242880", probe_url]
             result = subprocess.run(
                 curl_body, capture_output=True, text=True, timeout=20
             )
             if result.returncode != 0:
                 return False, 0.0, f"curl exit {result.returncode}"
             body = result.stdout
-            if probe_pattern:
-                if re.search(probe_pattern, body):
+            if probe_pattern is not None:
+                if probe_pattern.search(body):
                     return False, 0.0, "body matched restriction pattern"
             return True, 0.0, "body ok"
 
@@ -271,15 +289,18 @@ def sync_table(base_table, gw_index):
         if not ips:
             return
 
-        # Write to temp file and replace
-        tmpfile = f"/tmp/approuter_sync_{gw_table}.txt"
-        with open(tmpfile, "w") as f:
-            f.write("\n".join(ips) + "\n")
-        subprocess.run(
-            [PFCTL, "-t", gw_table, "-T", "replace", "-f", tmpfile],
-            capture_output=True, timeout=10
-        )
-        os.unlink(tmpfile)
+        # Write to a private temp file (mkstemp, not a predictable /tmp name
+        # that another local user could pre-create as a symlink) and replace
+        fd, tmpfile = tempfile.mkstemp(prefix="approuter_sync_", suffix=".txt")
+        try:
+            with os.fdopen(fd, "w") as f:
+                f.write("\n".join(ips) + "\n")
+            subprocess.run(
+                [PFCTL, "-t", gw_table, "-T", "replace", "-f", tmpfile],
+                capture_output=True, timeout=10
+            )
+        finally:
+            os.unlink(tmpfile)
         log(f"[sync] Copied {len(ips)} entries from {base_table} to {gw_table}")
     except (subprocess.TimeoutExpired, OSError) as e:
         log(f"[sync] Failed to sync {gw_table}: {e}", syslog.LOG_ERR)
@@ -505,6 +526,15 @@ def probe_rule_loop(rule):
         shutdown_event.wait(probe_interval)
 
 
+def read_pid():
+    """Return the PID from the pid file, or None if missing/garbage."""
+    try:
+        with open(PID_FILE) as f:
+            return int(f.read().strip())
+    except (OSError, ValueError):
+        return None
+
+
 def get_status():
     """Return status dict for API consumption."""
     with probe_results_lock:
@@ -582,9 +612,8 @@ def main():
             sys.exit(1)
 
     elif action == "stop":
-        if os.path.exists(PID_FILE):
-            with open(PID_FILE) as f:
-                pid = int(f.read().strip())
+        pid = read_pid()
+        if pid is not None:
             try:
                 os.kill(pid, signal.SIGTERM)
                 for _ in range(50):
@@ -602,9 +631,8 @@ def main():
             print("Geo prober not running")
 
     elif action == "status":
-        if os.path.exists(PID_FILE):
-            with open(PID_FILE) as f:
-                pid = int(f.read().strip())
+        pid = read_pid()
+        if pid is not None:
             try:
                 os.kill(pid, 0)
                 # Read state file for details
