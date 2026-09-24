@@ -13,8 +13,8 @@ jobs:
   python:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.11"
       - name: Install test dependencies
@@ -23,8 +23,8 @@ jobs:
         run: |
           python -m py_compile src/opnsense/scripts/OPNsense/Approuter/*.py
           for f in src/opnsense/scripts/OPNsense/Approuter/*.sh pkg/+*; do sh -n "$f"; done
-          sudo apt-get install -y -qq libxml2-utils
-          find src -name '*.xml' -print0 | xargs -0 xmllint --noout
+          # well-formedness of all XML (models, forms, menu, ACL); no apt needed
+          find src -name '*.xml' -print0 | xargs -0 -n1 python -c 'import sys, xml.etree.ElementTree as ET; ET.parse(sys.argv[1])'
       - name: Unit tests
         run: python -m pytest -q tests
 
@@ -35,7 +35,7 @@ jobs:
       matrix:
         core: [master, latest-stable]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: shivammathur/setup-php@v2
         with:
           php-version: "8.4"
