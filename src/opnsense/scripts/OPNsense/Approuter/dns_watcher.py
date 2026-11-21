@@ -24,6 +24,10 @@ import time
 import signal
 import syslog
 import threading
+import hashlib
+import random
+import struct
+from concurrent.futures import ThreadPoolExecutor
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
@@ -38,6 +42,8 @@ LOG_FILE = "/var/log/approuter_dns_watcher.log"
 LOG_MAX_BYTES = 5 * 1024 * 1024  # rotate once, keep a single .old copy
 PID_FILE = "/var/run/approuter_dns_watcher.pid"
 RESOLVE_INTERVAL = 300  # active resolution every 5 min (backup only)
+RESOLVE_WORKERS = 16    # concurrent DNS queries during active resolution
+RESOLVE_TIMEOUT = 3
 EXPIRE_CHECK_INTERVAL = 600  # how often to look for stale table entries
 DEFAULT_EXPIRE_HOURS = 24
 SMART_GW_STATE_FILE = "/usr/local/etc/app-router/smart_gateway_state.json"
@@ -50,6 +56,8 @@ UNBOUND_ADDR = "127.0.0.1"
 UNBOUND_PORT = 53530
 
 domain_table_map = {}
+# Serialises active resolution (initial, SIGHUP, periodic loop)
+_resolve_lock = threading.Lock()
 # Runtime settings from config.json (reloaded on SIGHUP)
 settings = {"table_prefix": "approuter", "expire_seconds": DEFAULT_EXPIRE_HOURS * 3600, "rules": []}
 # Last time each dynamically learned IP was seen in a DNS answer:
@@ -218,9 +226,30 @@ def detect_lan_interfaces():
     return interfaces
 
 
+def used_tables():
+    """pf tables referenced by the enabled rules (config.json).
+
+    Only these get domain mappings: learning IPs for categories no rule uses
+    wastes DNS queries and, since `pfctl -T add` creates missing tables,
+    leaves unreferenced tables full of IPs.
+    """
+    prefix = settings["table_prefix"]
+    tables = set()
+    for rule in settings["rules"]:
+        for cat in str(rule.get("categories", "")).split(","):
+            cat = cat.strip()
+            if cat:
+                tables.add(f"{prefix}_{cat.replace('.', '_')}")
+        if str(rule.get("custom_domains", "")).strip() and rule.get("uuid"):
+            tables.add(f"{prefix}_custom_{hashlib.md5(rule['uuid'].encode()).hexdigest()[:8]}")
+    return tables
+
+
 def load_domain_mappings():
     global domain_table_map
     new_map = {}
+    wanted = used_tables()
+    skipped = 0
 
     if not os.path.isdir(CONFIG_DIR):
         log(f"Config dir {CONFIG_DIR} not found")
@@ -232,6 +261,9 @@ def load_domain_mappings():
             with open(config_file) as f:
                 data = json.load(f)
             table = data.get("table", "")
+            if table not in wanted:
+                skipped += 1
+                continue
             for domain in data.get("domains", []):
                 key = domain.lower().rstrip('.')
                 if key not in new_map:
@@ -241,7 +273,8 @@ def load_domain_mappings():
             log(f"Error loading {config_file}: {e}", syslog.LOG_ERR)
 
     domain_table_map = new_map
-    log(f"Loaded {len(domain_table_map)} domain mappings from {CONFIG_DIR}")
+    log(f"Loaded {len(domain_table_map)} domain mappings for {len(wanted)} rule tables "
+        f"({skipped} unused category files skipped)")
 
 
 def match_domain(query_domain):
@@ -384,8 +417,16 @@ def load_seen():
 
 
 def save_seen():
-    """Persist the learned IP -> table map (root only, atomic)."""
+    """Persist the learned IP -> table map (root only, atomic).
+
+    Entries of tables no rule uses any more are dropped (kept while no
+    mappings are loaded, e.g. a stop during startup).
+    """
+    keep = mapped_tables()
     with ip_seen_lock:
+        if keep:
+            for table in [t for t in ip_seen if t not in keep]:
+                del ip_seen[table]
         data = json.dumps(ip_seen)
     tmp = SEEN_FILE + ".tmp"
     try:
@@ -664,70 +705,96 @@ def sniff_interface(iface):
         time.sleep(5)
 
 
-def resolve_via_unbound(domain):
-    """Resolve a domain using drill via the local Unbound instance."""
+def _dns_name(data, off):
+    """Skip a (possibly compressed) DNS name, return the offset after it."""
+    while True:
+        length = data[off]
+        if length == 0:
+            return off + 1
+        if length & 0xC0 == 0xC0:
+            return off + 2
+        off += 1 + length
+
+
+def parse_a_records(data, qid):
+    """A records from a DNS response (all answers, CNAME chains included)."""
+    if len(data) < 12:
+        return set()
+    rid, flags, qd, an = struct.unpack(">HHHH", data[:8])
+    if rid != qid or flags & 0x000F:   # wrong id or rcode != NOERROR
+        return set()
+    off = 12
+    for _ in range(qd):
+        off = _dns_name(data, off) + 4
     ips = set()
-    try:
-        result = subprocess.run(
-            ["/usr/bin/drill", f"@{UNBOUND_ADDR}", "-p", str(UNBOUND_PORT),
-             domain, "A"],
-            capture_output=True, text=True, timeout=10
-        )
-        in_answer = False
-        for line in result.stdout.splitlines():
-            if line.startswith(";; ANSWER SECTION:"):
-                in_answer = True
-                continue
-            if in_answer:
-                if line.startswith(";;") or not line.strip():
-                    break
-                parts = line.split()
-                if len(parts) >= 5 and parts[3] == "A":
-                    ip = parts[4]
-                    try:
-                        ipaddress.ip_address(ip)
-                        ips.add(ip)
-                    except ValueError:
-                        pass
-    except (subprocess.TimeoutExpired, OSError):
-        pass
+    for _ in range(an):
+        off = _dns_name(data, off)
+        rtype, _cls, _ttl, rdlen = struct.unpack(">HHIH", data[off:off + 10])
+        off += 10
+        if rtype == 1 and rdlen == 4:
+            ips.add(socket.inet_ntoa(data[off:off + 4]))
+        off += rdlen
     return ips
 
 
+def resolve_via_unbound(domain):
+    """A records for domain from the local Unbound (one UDP query, no subprocess)."""
+    try:
+        qname = b"".join(bytes([len(p)]) + p.encode("ascii") for p in domain.rstrip(".").split(".")) + b"\0"
+    except (UnicodeEncodeError, ValueError):
+        return set()
+    if len(qname) > 255:
+        return set()
+    qid = random.randint(0, 0xFFFF)
+    query = struct.pack(">HHHHHH", qid, 0x0100, 1, 0, 0, 0) + qname + struct.pack(">HH", 1, 1)
+    for _attempt in range(2):
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
+                sock.settimeout(RESOLVE_TIMEOUT)
+                sock.sendto(query, (UNBOUND_ADDR, UNBOUND_PORT))
+                data, _ = sock.recvfrom(4096)
+            return parse_a_records(data, qid)
+        except (OSError, struct.error, IndexError):
+            continue
+    return set()
+
+
 def resolve_and_update():
-    """Active resolution via drill as backup. Resolves bare + www. variants."""
+    """Active resolution as backup for the sniffer.
+
+    Each mapped domain (and its www. variant) is resolved once, concurrently,
+    and the answers are added to every table the domain belongs to.
+    """
     if not domain_table_map:
         return 0
     started = time.time()
 
-    # Collect domains per table (a domain may belong to multiple tables)
-    table_domains = {}
+    names = set()
+    for domain in domain_table_map:
+        names.add(domain)
+        if not domain.startswith("www."):
+            names.add(f"www.{domain}")
+    with ThreadPoolExecutor(max_workers=RESOLVE_WORKERS) as pool:
+        answers = dict(zip(sorted(names), pool.map(resolve_via_unbound, sorted(names))))
+
+    table_addrs = {}
     for domain, tables in domain_table_map.items():
+        ips = answers.get(domain, set()) | answers.get(f"www.{domain}", set())
+        # same filter as the sniffer: never route private ranges
+        public = {ip for ip in ips
+                  if ipaddress.ip_address(ip).version == 4 and not ipaddress.ip_address(ip).is_private}
         for table in tables:
-            table_domains.setdefault(table, []).append(domain)
+            table_addrs.setdefault(table, set()).update(public)
 
     total_added = 0
     all_new_ips = set()
-    for table, domains in table_domains.items():
-        addrs = set()
-        for domain in domains:
-            variants = [domain]
-            if not domain.startswith("www."):
-                variants.append(f"www.{domain}")
-            for variant in variants:
-                for ip in resolve_via_unbound(variant):
-                    # same filter as the sniffer: never route private ranges
-                    addr = ipaddress.ip_address(ip)
-                    if addr.version == 4 and not addr.is_private:
-                        addrs.add(ip)
-
+    for table, addrs in sorted(table_addrs.items()):
         mark_seen(table, addrs)
         added = add_to_table(table, addrs)
         if added > 0:
             total_added += added
             all_new_ips.update(addrs)
             log(f"[resolve] Added {added} new entries to {table}")
-        # Also add to active _gwN tables
         for gw_table in get_active_gw_tables_for(table):
             gw_added = add_to_table(gw_table, addrs)
             if gw_added > 0:
@@ -738,7 +805,7 @@ def resolve_and_update():
         if client_ips:
             kill_stale_states(all_new_ips, client_ips)
 
-    log(f"[resolve] Resolved {len(domain_table_map)} domains in {time.time() - started:.0f}s")
+    log(f"[resolve] Resolved {len(domain_table_map)} domains ({len(names)} names) in {time.time() - started:.1f}s")
     return total_added
 
 
@@ -746,14 +813,15 @@ def active_resolve_loop():
     """Background thread: periodic active resolution as fallback."""
     while True:
         time.sleep(RESOLVE_INTERVAL)
+        if not _resolve_lock.acquire(blocking=False):
+            continue        # an initial/SIGHUP resolution is still running
         try:
             load_domain_mappings()
             resolve_and_update()
         except Exception as e:
             log(f"Active resolution error: {e}", syslog.LOG_ERR)
-
-
-_resolve_lock = threading.Lock()
+        finally:
+            _resolve_lock.release()
 
 
 def start_background_resolve(reason):

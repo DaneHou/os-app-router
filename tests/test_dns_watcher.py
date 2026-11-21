@@ -177,3 +177,66 @@ def test_sniffers_start_before_initial_resolution_and_sighup_is_async():
     hup = src[src.index("def reload_mappings("):src.index("def cleanup(")]
     assert "resolve_and_update()" not in hup
     assert 'start_background_resolve("SIGHUP")' in hup
+
+
+def _dns_response(qid, answers, rcode=0):
+    """Build a DNS response: answers = [(type, rdata bytes)] for name example.com."""
+    import struct
+    q = b"\x07example\x03com\x00"
+    out = struct.pack(">HHHHHH", qid, 0x8180 | rcode, 1, len(answers), 0, 0) + q + struct.pack(">HH", 1, 1)
+    for rtype, rdata in answers:
+        out += b"\xc0\x0c" + struct.pack(">HHIH", rtype, 1, 60, len(rdata)) + rdata
+    return out
+
+
+def test_parse_a_records_follows_cname_chain_and_checks_id(dns_watcher):
+    import socket
+    cname = b"\x03cdn\xc0\x0c"
+    data = _dns_response(42, [(5, cname), (1, socket.inet_aton("1.2.3.4")), (1, socket.inet_aton("5.6.7.8"))])
+    assert dns_watcher.parse_a_records(data, 42) == {"1.2.3.4", "5.6.7.8"}
+    assert dns_watcher.parse_a_records(data, 43) == set()
+    assert dns_watcher.parse_a_records(_dns_response(42, [], rcode=3), 42) == set()
+    assert dns_watcher.parse_a_records(b"\x00\x2a", 42) == set()
+
+
+def test_used_tables_only_from_rules(dns_watcher):
+    dns_watcher.settings["table_prefix"] = "approuter"
+    dns_watcher.settings["rules"] = [
+        {"uuid": "u1", "categories": "video.iqiyi,china_all", "custom_domains": ""},
+        {"uuid": "u2", "categories": "", "custom_domains": "example.cn"},
+    ]
+    import hashlib
+    assert dns_watcher.used_tables() == {"approuter_video_iqiyi", "approuter_china_all",
+                                f"approuter_custom_{hashlib.md5(b'u2').hexdigest()[:8]}"}
+
+
+def test_load_domain_mappings_skips_unused_categories(dns_watcher, tmp_path, monkeypatch):
+    import json
+    monkeypatch.setattr(dns_watcher, "log", lambda *a, **k: None)
+    (tmp_path / "approuter_video_iqiyi.json").write_text(json.dumps({"table": "approuter_video_iqiyi", "domains": ["iqiyi.com"]}))
+    (tmp_path / "approuter_video_douyin.json").write_text(json.dumps({"table": "approuter_video_douyin", "domains": ["douyin.com"]}))
+    monkeypatch.setattr(dns_watcher, "CONFIG_DIR", str(tmp_path))
+    dns_watcher.settings["table_prefix"] = "approuter"
+    dns_watcher.settings["rules"] = [{"uuid": "u1", "categories": "video.iqiyi", "custom_domains": ""}]
+    dns_watcher.load_domain_mappings()
+    assert dns_watcher.domain_table_map == {"iqiyi.com": {"approuter_video_iqiyi"}}
+
+
+def test_resolve_and_update_resolves_each_name_once(dns_watcher, monkeypatch):
+    dns_watcher.domain_table_map = {"iqiyi.com": {"approuter_video", "approuter_video_iqiyi"}, "www.qy.net": {"approuter_video"}}
+    calls = []
+
+    def fake_resolve(name):
+        calls.append(name)
+        return {"iqiyi.com": {"1.1.1.1"}, "www.iqiyi.com": {"2.2.2.2", "10.0.0.1"}}.get(name, set())
+
+    added = {}
+    monkeypatch.setattr(dns_watcher, "resolve_via_unbound", fake_resolve)
+    monkeypatch.setattr(dns_watcher, "add_to_table", lambda t, a: added.setdefault(t, set()).update(a) or len(a))
+    monkeypatch.setattr(dns_watcher, "mark_seen", lambda *a: None)
+    monkeypatch.setattr(dns_watcher, "get_client_ips", lambda: set())
+    monkeypatch.setattr(dns_watcher, "log", lambda *a, **k: None)
+    dns_watcher.resolve_and_update()
+    assert sorted(calls) == ["iqiyi.com", "www.iqiyi.com", "www.qy.net"]
+    assert added["approuter_video_iqiyi"] == {"1.1.1.1", "2.2.2.2"}     # private dropped
+    assert added["approuter_video"] == {"1.1.1.1", "2.2.2.2"}
