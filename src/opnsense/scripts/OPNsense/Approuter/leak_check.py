@@ -23,8 +23,11 @@ import dns_watcher as dw  # noqa: E402
 NAMES_FILE = dw.NAMES_FILE
 MAX_LEAKS_PER_RULE = 50
 
+# "IF PROTO A [(A')] -> B" (outbound state, A' = address before NAT) or
+# "IF PROTO B <- A [(A')]" (inbound state: pf prints the destination first)
 STATE_RE = re.compile(
-    r"^\S+\s+(?P<proto>tcp|udp)\s+(?P<a>\S+)(?:\s+\((?P<inner>[^)]+)\))?\s+(?P<dir>->|<-)\s+(?P<b>\S+)")
+    r"^\S+\s+(?P<proto>tcp|udp)\s+(?P<a>\S+)(?:\s+\((?P<ainner>[^)]+)\))?\s+(?P<dir>->|<-)\s+"
+    r"(?P<b>\S+)(?:\s+\((?P<binner>[^)]+)\))?")
 RULE_RE = re.compile(r"\brule (\d+)\b")
 RULE_LINE_RE = re.compile(r"^@(\d+)\s+(.*)$")
 
@@ -44,11 +47,12 @@ def parse_states(text):
             if cur:
                 states.append(cur)
             cur = None
-            if m.group("dir") != "->":
-                continue            # inbound to the firewall / LAN, not a client connection
-            src = m.group("inner") or m.group("a")
+            if m.group("dir") == "->":
+                src, dst = m.group("ainner") or m.group("a"), m.group("b")
+            else:
+                src, dst = m.group("binner") or m.group("b"), m.group("a")
             client, cport = split_hostport(src)
-            dst, dport = split_hostport(m.group("b"))
+            dst, dport = split_hostport(dst)
             cur = {"proto": m.group("proto"), "client": client, "cport": cport,
                    "dst": dst, "dport": dport, "rule": None}
             continue
@@ -62,13 +66,19 @@ def parse_states(text):
 
 
 def parse_routed_rules(text, prefix):
-    """pfctl -vvsr output -> {rule number: set of destination tables} for route-to rules."""
+    """pfctl -vvsr output -> {rule number: set of destination tables} for App Router route-to rules.
+
+    A routed connection has an inbound state created by such a rule (on the
+    client interface) and an outbound state created by the gateway's own
+    rule; a leaked one has neither from App Router.
+    """
     routed = {}
     for line in text.splitlines():
         m = RULE_LINE_RE.match(line)
         if not m or "route-to" not in m.group(2):
             continue
-        tables = set(re.findall(r"to <(" + re.escape(prefix) + r"_[A-Za-z0-9_]+)>", m.group(2)))
+        # pfctl -vvsr prints table sizes: <approuter_video_iqiyi:301>
+        tables = set(re.findall(r"to <(" + re.escape(prefix) + r"_[A-Za-z0-9_]+)(?::\d+)?>", m.group(2)))
         if tables:
             routed[int(m.group(1))] = tables
     return routed
