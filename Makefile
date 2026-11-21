@@ -110,11 +110,12 @@ activate:
 	@# Verify PHP syntax
 	@find $(PLUGIN_MVC)/controllers/OPNsense/Approuter -name '*.php' -exec php -l {} \; 2>&1 | grep -v "No syntax errors" || true
 	@find $(PLUGIN_MVC)/models/OPNsense/Approuter -name '*.php' -exec php -l {} \; 2>&1 | grep -v "No syntax errors" || true
-	@# Restart dns_watcher on the new code if it was running. It is never left
+	@# (Re)start dns_watcher if it was running or App Router is enabled. It is never left
 	@# stopped: while it is down nothing learns new CDN IPs. SIGTERM makes it
 	@# save ip_seen.json; the new instance re-adds those (non-expired) IPs.
 	@# pf tables are not touched here.
 	@running=0; pgrep -qf 'dns_watcher.py start' && running=1; \
+	php -r 'require_once "config.inc"; $$c=OPNsense\Core\Config::getInstance()->object(); exit(((string)($$c->OPNsense->Approuter->general->enabled ?? "0"))==="1" ? 0 : 1);' 2>/dev/null && running=1; \
 	pkill -f 'dns_watcher.py' 2>/dev/null || true; \
 	rm -f /var/run/approuter_dns_watcher.pid 2>/dev/null || true; \
 	service configd restart 2>/dev/null || echo "Note: configd not running (dev environment?)"; \
