@@ -40,7 +40,6 @@ function approuter_firewall(\OPNsense\Firewall\Plugin $fw)
     }
 
     $tablePrefix = (string)$mdl->general->tablePrefix ?: 'approuter';
-    $cidrsDir = '/usr/local/etc/app-router/cidrs';
     $clientsDir = '/usr/local/etc/app-router/clients';
     if (!is_dir($clientsDir)) {
         mkdir($clientsDir, 0750, true);
@@ -91,19 +90,10 @@ function approuter_firewall(\OPNsense\Firewall\Plugin $fw)
     foreach (array_keys($categoriesNeeded) as $category) {
         // Convert dots to underscores for pf table name
         $tableName = $tablePrefix . '_' . str_replace('.', '_', $category);
-        // Try dotted filename first (e.g. video.bilibili.txt), then underscored
-        $cidrFile = $cidrsDir . '/' . $category . '.txt';
-        if (!file_exists($cidrFile)) {
-            $cidrFile = $cidrsDir . '/' . str_replace('.', '_', $category) . '.txt';
-        }
-
-        if (file_exists($cidrFile)) {
-            $fw->registerTable($tableName, true, $cidrFile);
-        } else {
-            $fw->registerTable($tableName, [
-                'persist' => true,
-            ]);
-        }
+        // Contents come from `pfctl -T replace` (table_manager.sh / Apply) and
+        // dns_watcher; a `file` clause would reset learned IPs on every filter
+        // reload, so declare the table persistent without a file.
+        $fw->registerTable($tableName, true);
 
         // Register _gwN tables for smart gateway categories
         if (isset($smartGwPerCategory[$category])) {
@@ -111,9 +101,7 @@ function approuter_firewall(\OPNsense\Firewall\Plugin $fw)
             // Register _gw0 through _gw(N-2) (last gateway uses main table)
             for ($i = 0; $i < $gwCount - 1; $i++) {
                 $gwTableName = $tableName . '_gw' . $i;
-                $fw->registerTable($gwTableName, [
-                    'persist' => true,
-                ]);
+                $fw->registerTable($gwTableName, true);
             }
         }
     }
@@ -165,16 +153,14 @@ function approuter_firewall(\OPNsense\Firewall\Plugin $fw)
         // Register custom domains table if rule has customDomains
         if (!empty($rule['customDomains'])) {
             $customTableName = $tablePrefix . '_custom_' . substr(md5($rule['uuid']), 0, 8);
-            $fw->registerTable($customTableName, [
-                'persist' => true,
-            ]);
+            $fw->registerTable($customTableName, true);
             $validCustomTables[] = $customTableName;
 
             if ($isSmart) {
                 // Smart mode: register _gwN tables and N rules for custom domains
                 for ($i = 0; $i < count($gateways) - 1; $i++) {
                     $gwCustomTable = $customTableName . '_gw' . $i;
-                    $fw->registerTable($gwCustomTable, ['persist' => true]);
+                    $fw->registerTable($gwCustomTable, true);
                     $description = 'AppRouter: ' . ($rule['description'] ?: 'custom domains') . ' via ' . trim($gateways[$i]) . ' [smart gw' . $i . ']';
                     $fw->registerFilterRule(
                         $priority,

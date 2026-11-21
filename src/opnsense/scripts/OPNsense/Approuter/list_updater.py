@@ -37,6 +37,21 @@ CATEGORIES_FILE = "/usr/local/opnsense/scripts/OPNsense/Approuter/app_categories
 CONFIG_FILE = os.path.join(BASE_DIR, "config.json")
 STATE_FILE = os.path.join(BASE_DIR, "state.json")
 
+# Built-in remote lists. config.json may override "sources"; these also supply
+# the fallback URL per source id (restored: removed by mistake in 7e30c38).
+DEFAULT_SOURCES = {
+    "china_domains": {
+        "url": "https://raw.githubusercontent.com/felixonmars/dnsmasq-china-list/master/accelerated-domains.china.conf",
+        "type": "dnsmasq",
+        "description": "China accelerated domains (felixonmars)",
+    },
+    "china_cidrs_v4": {
+        "url": "https://raw.githubusercontent.com/misakaio/chnroutes2/master/chnroutes.txt",
+        "type": "cidr",
+        "description": "China IPv4 CIDR blocks (chnroutes2)",
+    },
+}
+
 V2FLY_BASE_URL = "https://raw.githubusercontent.com/v2fly/domain-list-community/master/data"
 
 # Valid domain pattern: optional wildcard prefix, then RFC-1123 labels
