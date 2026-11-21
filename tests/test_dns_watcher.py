@@ -166,3 +166,14 @@ def test_iqiyi_carrier_cdn_domain_listed():
     from conftest import SCRIPTS
     cats = json.load(open(os.path.join(SCRIPTS, "app_categories.json")))
     assert "71edge.com" in cats["video"]["apps"]["iqiyi"]["domains"]
+
+
+def test_sniffers_start_before_initial_resolution_and_sighup_is_async():
+    import pathlib, re
+    src = pathlib.Path(__file__).resolve().parent.parent.joinpath(
+        "src/opnsense/scripts/OPNsense/Approuter/dns_watcher.py").read_text()
+    main = src[src.index("def main():"):]
+    assert main.index("target=sniff_interface") < main.index('start_background_resolve("initial")')
+    hup = src[src.index("def reload_mappings("):src.index("def cleanup(")]
+    assert "resolve_and_update()" not in hup
+    assert 'start_background_resolve("SIGHUP")' in hup

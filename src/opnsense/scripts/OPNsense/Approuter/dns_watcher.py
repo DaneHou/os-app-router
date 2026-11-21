@@ -731,6 +731,25 @@ def active_resolve_loop():
             log(f"Active resolution error: {e}", syslog.LOG_ERR)
 
 
+_resolve_lock = threading.Lock()
+
+
+def start_background_resolve(reason):
+    """Run resolve_and_update() in a background thread; skip if one is running."""
+    def run():
+        if not _resolve_lock.acquire(blocking=False):
+            log(f"Active resolution ({reason}) skipped: one is already running")
+            return
+        try:
+            added = resolve_and_update()
+            log(f"Active resolution ({reason}): {added} new entries added")
+        except Exception as e:
+            log(f"Active resolution ({reason}) failed: {e}", syslog.LOG_ERR)
+        finally:
+            _resolve_lock.release()
+    threading.Thread(target=run, daemon=True).start()
+
+
 def reload_mappings(signum=None, frame=None):
     """SIGHUP handler: reload domain mappings and smart gateway state."""
     log("Received SIGHUP, reloading domain mappings and smart gateway state")
@@ -739,7 +758,9 @@ def reload_mappings(signum=None, frame=None):
     load_smart_gw_state()
     # Apply sends SIGHUP after the filter reload: put learned IPs back first
     restore_seen()
-    resolve_and_update()
+    # Active resolution of ~1000 domains takes minutes; never run it inside the
+    # signal handler (it blocks the main thread and stacks on repeated SIGHUPs).
+    start_background_resolve("SIGHUP")
 
 
 def cleanup(signum=None, frame=None):
@@ -772,15 +793,16 @@ def main():
             log("No LAN interfaces detected, sniffing disabled",
                 syslog.LOG_WARNING)
 
-        # Initial active resolution to seed tables
-        added = resolve_and_update()
-        log(f"Initial resolution: {added} new entries added")
-
-        # Start DNS sniffers on each LAN interface
+        # Start DNS sniffers first: they learn what clients actually resolve
+        # right now. The initial active resolution takes minutes and used to
+        # delay them, leaving a blind window after every (re)start/Apply.
         for iface in interfaces:
             t = threading.Thread(target=sniff_interface, args=(iface,),
                                 daemon=True)
             t.start()
+
+        # Initial active resolution to seed tables, in the background
+        start_background_resolve("initial")
 
         # Start periodic active resolution (backup, every 5 min)
         resolver_thread = threading.Thread(target=active_resolve_loop,
