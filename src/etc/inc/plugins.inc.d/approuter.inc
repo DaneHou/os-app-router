@@ -98,10 +98,7 @@ function approuter_firewall(\OPNsense\Firewall\Plugin $fw)
         }
 
         if (file_exists($cidrFile)) {
-            $fw->registerTable($tableName, [
-                'file' => $cidrFile,
-                'persist' => true,
-            ]);
+            $fw->registerTable($tableName, true, $cidrFile);
         } else {
             $fw->registerTable($tableName, [
                 'persist' => true,
@@ -152,10 +149,8 @@ function approuter_firewall(\OPNsense\Firewall\Plugin $fw)
             if ($written === false) {
                 syslog(LOG_ERR, "approuter: failed to write client file $clientFile");
             }
-            $fw->registerTable($clientTableName, [
-                'file' => $clientFile,
-                'persist' => true,
-            ]);
+            // core signature is registerTable($name, $persist, $file)
+            $fw->registerTable($clientTableName, true, $clientFile);
             $validClientFiles[] = $clientTableName . '.txt';
             $fromClause = '<' . $clientTableName . '>';
         }
