@@ -107,3 +107,62 @@ def test_client_ips_alias_table_missing(dns_watcher, tmp_path, monkeypatch):
     monkeypatch.setattr(dns_watcher, "show_table", lambda t: None)
     assert dns_watcher.get_client_ips() == set()
 
+
+
+def _fake_pf_add(monkeypatch, dns_watcher, tables):
+    added = {}
+
+    def add(table, addrs):
+        new = set(addrs) - set(tables.setdefault(table, []))
+        tables[table] = list(tables[table]) + sorted(new)
+        added.setdefault(table, set()).update(addrs)
+        return len(new)
+    monkeypatch.setattr(dns_watcher, "add_to_table", add)
+    return added
+
+
+def test_restore_readds_fresh_learned_ips(dns_watcher, monkeypatch):
+    tables = {"approuter_video_iqiyi": [], "approuter_video_iqiyi_gw0": []}
+    monkeypatch.setattr(dns_watcher, "show_table", lambda t: tables.get(t))
+    added = _fake_pf_add(monkeypatch, dns_watcher, tables)
+    dns_watcher.domain_table_map = {"iqiyi.com": {"approuter_video_iqiyi", "approuter_gone"},
+                                    "x.com": {"approuter_unmapped_never"}}
+    dns_watcher.active_gw_tables = {"approuter_video_iqiyi_gw0"}
+    dns_watcher.settings.update(expire_seconds=3600)
+    now = time.time()
+    dns_watcher.ip_seen = {
+        "approuter_video_iqiyi": {"1.1.1.1": now - 60, "2.2.2.2": now - 7200},
+        "approuter_gone": {"3.3.3.3": now},          # table not in pf: not created
+        "approuter_other": {"4.4.4.4": now},         # no longer mapped: not restored
+    }
+    assert dns_watcher.restore_seen() == 1
+    assert added == {"approuter_video_iqiyi": {"1.1.1.1"}, "approuter_video_iqiyi_gw0": {"1.1.1.1"}}
+
+
+def test_expiry_keeps_fresh_ips_missing_from_pf(dns_watcher, monkeypatch):
+    table = "approuter_video_iqiyi"
+    tables = {table: []}   # table was reset
+    _fake_pf(monkeypatch, dns_watcher, tables)
+    _fake_pf_add(monkeypatch, dns_watcher, tables)
+    dns_watcher.domain_table_map = {"iqiyi.com": {table}}
+    dns_watcher.settings.update(table_prefix="approuter", expire_seconds=3600)
+    now = time.time()
+    dns_watcher.ip_seen = {table: {"1.1.1.1": now - 60, "2.2.2.2": now - 7200}}
+    dns_watcher.expire_stale_entries()
+    assert set(dns_watcher.ip_seen[table]) == {"1.1.1.1"}
+    assert tables[table] == ["1.1.1.1"]
+
+
+def test_seen_file_is_root_only(dns_watcher):
+    import os
+    import stat
+    dns_watcher.ip_seen = {"approuter_video": {"1.1.1.1": time.time()}}
+    dns_watcher.save_seen()
+    assert stat.S_IMODE(os.stat(dns_watcher.SEEN_FILE).st_mode) == 0o600
+
+
+def test_iqiyi_carrier_cdn_domain_listed():
+    import os
+    from conftest import SCRIPTS
+    cats = json.load(open(os.path.join(SCRIPTS, "app_categories.json")))
+    assert "71edge.com" in cats["video"]["apps"]["iqiyi"]["domains"]

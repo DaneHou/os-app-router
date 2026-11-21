@@ -67,6 +67,7 @@ install-plugin:
 	@cp src/opnsense/scripts/OPNsense/Approuter/dns_watcher.py $(PLUGIN_SCRIPTS)/
 	@cp src/opnsense/scripts/OPNsense/Approuter/geo_prober.py $(PLUGIN_SCRIPTS)/
 	@cp src/opnsense/scripts/OPNsense/Approuter/table_manager.sh $(PLUGIN_SCRIPTS)/
+	@cp src/opnsense/scripts/OPNsense/Approuter/static_sync.py $(PLUGIN_SCRIPTS)/
 	@cp src/opnsense/scripts/OPNsense/Approuter/diagnose.sh $(PLUGIN_SCRIPTS)/
 	@cp src/opnsense/scripts/OPNsense/Approuter/app_categories.json $(PLUGIN_SCRIPTS)/
 	@chmod +x $(PLUGIN_SCRIPTS)/*.py
@@ -105,14 +106,21 @@ activate:
 	@# Verify PHP syntax
 	@find $(PLUGIN_MVC)/controllers/OPNsense/Approuter -name '*.php' -exec php -l {} \; 2>&1 | grep -v "No syntax errors" || true
 	@find $(PLUGIN_MVC)/models/OPNsense/Approuter -name '*.php' -exec php -l {} \; 2>&1 | grep -v "No syntax errors" || true
-	@# Kill any old dns_watcher before restarting services
-	@pkill -f 'dns_watcher.py' 2>/dev/null || true
-	@rm -f /var/run/approuter_dns_watcher.pid 2>/dev/null || true
-	@# Restart configd to register new actions
-	@service configd restart 2>/dev/null || echo "Note: configd not running (dev environment?)"
-	@# Restart php-fpm to clear opcache (ensures new PHP code is loaded)
-	@service php-fpm restart 2>/dev/null || true
-	@echo ">>> Plugin activated. Click Apply in the UI to start dns_watcher."
+	@# Restart dns_watcher on the new code if it was running. It is never left
+	@# stopped: while it is down nothing learns new CDN IPs. SIGTERM makes it
+	@# save ip_seen.json; the new instance re-adds those (non-expired) IPs.
+	@# pf tables are not touched here.
+	@running=0; pgrep -qf 'dns_watcher.py start' && running=1; \
+	pkill -f 'dns_watcher.py' 2>/dev/null || true; \
+	rm -f /var/run/approuter_dns_watcher.pid 2>/dev/null || true; \
+	service configd restart 2>/dev/null || echo "Note: configd not running (dev environment?)"; \
+	service php-fpm restart 2>/dev/null || true; \
+	if [ $$running = 1 ]; then \
+		sleep 1; configctl approuter dns_watcher_start >/dev/null 2>&1 && echo ">>> dns_watcher restarted"; \
+	else \
+		echo ">>> Click Apply in the UI to start dns_watcher."; \
+	fi
+	@echo ">>> Plugin activated."
 
 uninstall:
 	@echo ">>> Uninstalling $(PLUGIN_NAME)..."
@@ -204,6 +212,7 @@ lint:
 	@python3 -m py_compile src/opnsense/scripts/OPNsense/Approuter/list_updater.py
 	@python3 -m py_compile src/opnsense/scripts/OPNsense/Approuter/dns_watcher.py
 	@python3 -m py_compile src/opnsense/scripts/OPNsense/Approuter/geo_prober.py
+	@python3 -m py_compile src/opnsense/scripts/OPNsense/Approuter/static_sync.py
 	@echo ">>> Checking XML files..."
 	@find src -name '*.xml' -exec xmllint --noout {} \; 2>/dev/null || echo "(xmllint not available, skipping)"
 	@echo ">>> All checks passed."

@@ -384,15 +384,62 @@ def load_seen():
 
 
 def save_seen():
+    """Persist the learned IP -> table map (root only, atomic)."""
     with ip_seen_lock:
         data = json.dumps(ip_seen)
+    tmp = SEEN_FILE + ".tmp"
     try:
-        tmp = SEEN_FILE + ".tmp"
-        with open(tmp, "w") as f:
+        if os.path.exists(tmp):
+            os.unlink(tmp)
+        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        with os.fdopen(fd, "w") as f:
             f.write(data)
         os.replace(tmp, SEEN_FILE)
+        os.chmod(SEEN_FILE, 0o600)
     except OSError as e:
         log(f"Failed to write {SEEN_FILE}: {e}", syslog.LOG_ERR)
+
+
+def is_fresh(ts, now):
+    expire = settings["expire_seconds"]
+    return expire <= 0 or now - ts <= expire
+
+
+def mapped_tables():
+    tables = set()
+    for t in domain_table_map.values():
+        tables.update(t)
+    return tables
+
+
+def restore_seen():
+    """Re-add persisted, not yet expired learned IPs missing from pf.
+
+    Covers a watcher restart, a reboot (pf starts empty) and anything that
+    reset a category table. Clients keep their DNS caches, so without this
+    those IPs would not be relearned until the TTL runs out. Tables that no
+    rule uses (not in pf) are not created.
+    """
+    now = time.time()
+    total = 0
+    for table in sorted(mapped_tables()):
+        with ip_seen_lock:
+            fresh = {ip for ip, ts in ip_seen.get(table, {}).items() if is_fresh(ts, now)}
+        if not fresh:
+            continue
+        entries = show_table(table)
+        if entries is None:
+            continue
+        missing = fresh - set(entries)
+        if not missing:
+            continue
+        with table_lock:
+            added = add_to_table(table, missing)
+            for gw_table in get_active_gw_tables_for(table):
+                add_to_table(gw_table, missing)
+        total += added
+        log(f"[restore] Re-added {added} learned entries to {table}")
+    return total
 
 
 def expire_stale_entries():
@@ -404,11 +451,11 @@ def expire_stale_entries():
     """
     expire = settings["expire_seconds"]
     if expire <= 0:
+        restore_seen()
+        save_seen()
         return 0
     now = time.time()
-    tables = set()
-    for t in domain_table_map.values():
-        tables.update(t)
+    tables = mapped_tables()
     total = 0
     for table in sorted(tables):
         entries = show_table(table)
@@ -428,9 +475,10 @@ def expire_stale_entries():
                     seen[ip] = now
                 elif now - ts > expire:
                     stale.append(ip)
-            # forget IPs that are gone from pf (flushed, reboot, expired)
+            # forget expired IPs; fresh ones missing from pf (table reset,
+            # reboot) are kept and re-added by restore_seen() below
             for ip in list(seen):
-                if ip not in present or ip in stale:
+                if ip in stale or (ip not in present and not is_fresh(seen[ip], now)):
                     del seen[ip]
         if stale:
             with table_lock:
@@ -444,6 +492,7 @@ def expire_stale_entries():
         for table in list(ip_seen):
             if table not in tables:
                 del ip_seen[table]
+    restore_seen()
     save_seen()
     return total
 
@@ -688,10 +737,13 @@ def reload_mappings(signum=None, frame=None):
     load_settings()
     load_domain_mappings()
     load_smart_gw_state()
+    # Apply sends SIGHUP after the filter reload: put learned IPs back first
+    restore_seen()
     resolve_and_update()
 
 
 def cleanup(signum=None, frame=None):
+    save_seen()
     log("DNS watcher stopped")
     sys.exit(0)
 
@@ -711,6 +763,8 @@ def main():
         load_domain_mappings()
         load_smart_gw_state()
         log(f"DNS watcher started (PID {os.getpid()})")
+        restored = restore_seen()
+        log(f"Restored {restored} learned entries from {SEEN_FILE}")
 
         # Detect LAN interfaces for DNS sniffing
         interfaces = detect_lan_interfaces()

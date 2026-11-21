@@ -32,57 +32,23 @@ ensure_dirs() {
     fi
 }
 
+SYNC="/usr/local/opnsense/scripts/OPNsense/Approuter/static_sync.py"
+
+# Static CIDR lists are merged into the category tables by static_sync.py:
+# never `pfctl -T replace` a category table, that drops the IPs dns_watcher
+# learned from DNS answers (clients keep their DNS cache, so they would not be
+# relearned for a while and the traffic leaves via the default gateway).
 reload_table() {
-    local category="$1"
-    local table_name="${TABLE_PREFIX}_${category}"
-    local cidr_file="${CIDRS_DIR}/${category}.txt"
-    local merged_file="${WORKDIR}/${category}_merged.txt"
-
-    if [ -f "${cidr_file}" ]; then
-        cp "${cidr_file}" "${merged_file}"
-    else
-        : > "${merged_file}"
-    fi
-
-    ${PFCTL} -t "${table_name}" -T show > /dev/null 2>&1
-    if [ $? -eq 0 ]; then
-        ${PFCTL} -t "${table_name}" -T replace -f "${merged_file}" 2>/dev/null
-        if [ $? -eq 0 ]; then
-            local count
-            count=$(${PFCTL} -t "${table_name}" -T show | wc -l | tr -d ' ')
-            log_info "Table ${table_name} reloaded: ${count} entries"
-        else
-            log_err "Failed to reload table ${table_name}"
-            return 1
-        fi
-    else
-        log_info "Table ${table_name} not yet in pf, skipping reload"
-    fi
-
-    rm -f "${merged_file}"
-    return 0
+    "${SYNC}" "$1"
 }
 
 reload_all() {
-    ensure_dirs
-    local errors=0
-
-    if [ -d "${CIDRS_DIR}" ]; then
-        for cidr_file in "${CIDRS_DIR}"/*.txt; do
-            [ -f "${cidr_file}" ] || continue
-            local category
-            category=$(basename "${cidr_file}" .txt)
-            reload_table "${category}" || errors=$((errors + 1))
-        done
+    if "${SYNC}" all; then
+        log_info "All static lists merged into pf tables"
+        return 0
     fi
-
-    if [ ${errors} -gt 0 ]; then
-        log_err "Table reload completed with ${errors} errors"
-        return 1
-    fi
-
-    log_info "All tables reloaded successfully"
-    return 0
+    log_err "Static list merge failed"
+    return 1
 }
 
 show_table() {
