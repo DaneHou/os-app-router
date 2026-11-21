@@ -22,6 +22,8 @@ import time
 
 CONFIG_FILE = "/usr/local/etc/app-router/config.json"
 STATE_FILE = "/usr/local/etc/app-router/smart_gateway_state.json"
+# Per-rule gateway decisions, kept across restarts (Apply restarts the prober)
+PERSIST_FILE = "/usr/local/etc/app-router/smart_gateway_persist.json"
 PID_FILE = "/var/run/approuter_geo_prober.pid"
 LOG_FILE = "/var/log/approuter_geo_prober.log"
 
@@ -49,6 +51,9 @@ active_tables_lock = threading.Lock()
 probe_results = {}
 probe_results_lock = threading.Lock()
 shutdown_event = threading.Event()
+# uuid -> {"signature": str, "gw_states": {i: state}} of the running probe loops
+rule_registry = {}
+rule_registry_lock = threading.RLock()  # also taken from the SIGTERM handler
 
 
 def log(msg, level=syslog.LOG_INFO):
@@ -120,6 +125,10 @@ def load_config():
             probe_interval = 300
 
         smart_rules.append({
+            "uuid": rule.get("uuid", ""),
+            "signature": rule_signature(gateways, base_tables, probe_url,
+                                        rule.get("probe_method", "connect_only"),
+                                        rule.get("probe_pattern", "")),
             "description": desc,
             "gateways": gateways,
             "base_tables": base_tables,
@@ -130,6 +139,128 @@ def load_config():
         })
 
     return smart_rules
+
+
+def rule_signature(gateways, base_tables, probe_url, probe_method, probe_pattern):
+    """Identity of a smart rule for state restore: if any of these change,
+    previous probe results say nothing about the new rule."""
+    return json.dumps([list(gateways), list(base_tables), probe_url,
+                       probe_method or "", probe_pattern or ""])
+
+
+def new_gw_state():
+    return {
+        "available": False,
+        "consecutive_ok": 0,
+        "consecutive_fail": 0,
+        "last_switch_time": 0,
+        "latency": 0.0,
+    }
+
+
+def restore_max_age(rule):
+    """Saved state older than this is not trusted (e.g. after a long outage)."""
+    return max(2 * rule["probe_interval"], 600)
+
+
+def load_persisted():
+    try:
+        with open(PERSIST_FILE) as f:
+            data = json.load(f)
+        rules = data.get("rules", {})
+        return rules if isinstance(rules, dict) else {}
+    except FileNotFoundError:
+        return {}
+    except (OSError, ValueError) as e:
+        log(f"Ignoring unreadable {PERSIST_FILE}: {e}", syslog.LOG_WARNING)
+        return {}
+
+
+def restored_gw_states(rule, persisted, now=None):
+    """Gateway states to resume with, or None to start in fallback mode.
+
+    Only used when the rule (gateways, tables, probe settings) is unchanged
+    and the state was saved recently, i.e. the prober was just restarted by
+    Apply. Restored available gateways count as debounced, so they stay
+    active until DEBOUNCE_COUNT probes fail, as if the prober never stopped.
+    """
+    now = time.time() if now is None else now
+    saved = persisted.get(rule.get("uuid") or "")
+    if not isinstance(saved, dict) or saved.get("signature") != rule["signature"]:
+        return None
+    try:
+        age = now - float(saved.get("saved_at", 0))
+    except (TypeError, ValueError):
+        return None
+    if age < 0 or age > restore_max_age(rule):
+        return None
+    saved_gws = saved.get("gateways")
+    num_probed = len(rule["gateways"]) - 1
+    if not isinstance(saved_gws, list) or len(saved_gws) != num_probed:
+        return None
+    states = {}
+    for i, g in enumerate(saved_gws):
+        st = new_gw_state()
+        if isinstance(g, dict) and g.get("available") is True:
+            st["available"] = True
+            st["consecutive_ok"] = DEBOUNCE_COUNT
+            try:
+                st["latency"] = float(g.get("latency", 0.0))
+                st["last_switch_time"] = float(g.get("last_switch_time", 0))
+            except (TypeError, ValueError):
+                pass
+        states[i] = st
+    return states
+
+
+def save_persisted():
+    """Write the gateway decisions of all running rules (atomic replace)."""
+    now = time.time()
+    with rule_registry_lock:
+        rules = {}
+        for uuid, entry in rule_registry.items():
+            if not uuid:
+                continue
+            states = entry["gw_states"]
+            rules[uuid] = {
+                "signature": entry["signature"],
+                "saved_at": now,
+                "gateways": [
+                    {
+                        "available": bool(states[i]["available"]),
+                        "latency": states[i]["latency"],
+                        "last_switch_time": states[i]["last_switch_time"],
+                    }
+                    for i in sorted(states)
+                ],
+            }
+    try:
+        tmpfile = PERSIST_FILE + ".tmp"
+        with open(tmpfile, "w") as f:
+            json.dump({"rules": rules}, f)
+        os.replace(tmpfile, PERSIST_FILE)
+    except OSError as e:
+        log(f"Failed to write {PERSIST_FILE}: {e}", syslog.LOG_ERR)
+
+
+def init_rule_tables(rule, gw_states):
+    """Bring the _gwN tables of a rule in line with its (restored) state.
+
+    Restored active gateways keep their tables (refreshed from the main
+    table, which also holds everything dns_watcher learned meanwhile);
+    everything else is flushed (fallback mode) as before.
+    """
+    for i in range(len(rule["gateways"]) - 1):
+        for base_table in rule["base_tables"]:
+            gw_table = f"{base_table}_gw{i}"
+            if gw_states[i]["available"]:
+                sync_table(base_table, i)
+                with active_tables_lock:
+                    active_tables.add(gw_table)
+            else:
+                flush_table(base_table, i)
+                with active_tables_lock:
+                    active_tables.discard(gw_table)
 
 
 def get_gateway_interface(gw_name):
@@ -360,7 +491,7 @@ def notify_dns_watcher():
         pass
 
 
-def probe_rule_loop(rule):
+def probe_rule_loop(rule, gw_states=None):
     """Probe loop for a single smart rule. Runs in its own thread."""
     gateways = rule["gateways"]
     base_tables = rule["base_tables"]
@@ -373,21 +504,18 @@ def probe_rule_loop(rule):
     # State per non-fallback gateway
     # gw_index 0..N-2 are probed; N-1 is fallback (always uses main table)
     num_probed = len(gateways) - 1
-    gw_states = {}
-    for i in range(num_probed):
-        gw_states[i] = {
-            "available": False,
-            "consecutive_ok": 0,
-            "consecutive_fail": 0,
-            "last_switch_time": 0,
-            "latency": 0.0,
-        }
+    if gw_states is None:
+        gw_states = {i: new_gw_state() for i in range(num_probed)}
 
     log(f"[probe] Starting probe loop for '{desc}': "
         f"gateways={gateways}, interval={probe_interval}s, method={probe_method}")
 
     # Track which gateway is currently active for switch logging
-    current_active_gw = gateways[-1]  # starts with fallback
+    current_active_gw = gateways[-1]  # fallback unless a restored gw is active
+    for i in range(num_probed):
+        if gw_states[i]["available"]:
+            current_active_gw = gateways[i]
+            break
 
     while not shutdown_event.is_set():
         probe_summary = []
@@ -513,6 +641,7 @@ def probe_rule_loop(rule):
             # Update state file and notify dns_watcher
             write_state()
             notify_dns_watcher()
+            save_persisted()
 
             # Log final state summary
             gw_summary = []
@@ -557,6 +686,8 @@ def reload_config(signum=None, frame=None):
 def cleanup(signum=None, frame=None):
     log("Geo prober stopping")
     shutdown_event.set()
+    # keep gateway decisions so a restart (Apply) can resume them
+    save_persisted()
     # Clean up state file
     try:
         if os.path.exists(STATE_FILE):
@@ -584,21 +715,35 @@ def main():
 
         log(f"Found {len(smart_rules)} smart gateway rules")
 
-        # Initialize: ensure all _gwN tables are empty (fallback mode)
+        # Initialize: resume the previous gateway decisions of unchanged
+        # rules (Apply restarts us; flushing would leave the _gwN tables
+        # empty until DEBOUNCE_COUNT probes passed again), otherwise start
+        # with empty _gwN tables (fallback mode).
+        persisted = load_persisted()
+        rule_states = []
         for rule in smart_rules:
-            for base_table in rule["base_tables"]:
-                for i in range(len(rule["gateways"]) - 1):
-                    flush_table(base_table, i)
+            gw_states = restored_gw_states(rule, persisted)
+            if gw_states is not None:
+                active = [rule["gateways"][i] for i in gw_states if gw_states[i]["available"]]
+                log(f"Resuming saved state for '{rule['description']}': "
+                    f"active={active or 'fallback'}")
+            else:
+                gw_states = {i: new_gw_state() for i in range(len(rule["gateways"]) - 1)}
+            init_rule_tables(rule, gw_states)
+            with rule_registry_lock:
+                rule_registry[rule["uuid"]] = {"signature": rule["signature"], "gw_states": gw_states}
+            rule_states.append((rule, gw_states))
+        save_persisted()
 
-        # Write initial empty state
+        # Write initial state
         write_state()
         notify_dns_watcher()
 
         # Start probe threads
         threads = []
-        for rule in smart_rules:
+        for rule, gw_states in rule_states:
             t = threading.Thread(
-                target=probe_rule_loop, args=(rule,), daemon=True
+                target=probe_rule_loop, args=(rule, gw_states), daemon=True
             )
             t.start()
             threads.append(t)
