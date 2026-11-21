@@ -159,6 +159,15 @@ CIDRs:   203.0.113.10
 - `china_all` 是 IP 列表，没有域名可以转发。
 - **Unbound 前面还有其他 DNS 服务（AdGuard Home、Pi-hole）时：**它们必须把这些域名转给 Unbound，否则会自己去解析。域名清单在 `/usr/local/etc/app-router/dns_via_gateway.txt`。在 AdGuard Home 里为每个域名加一行上游，例如 `[/iqiyi.com/]127.0.0.1:53530`（Unbound 的端口）。AdGuard 对同一个域名的多条上游会合并使用，所以要把这个域名从其他上游列表里去掉。
 
+### 泄漏检测
+
+在 **Status → Run Leak Check** 里，会按规则列出这条规则的设备当前访问规则域名的连接，并统计其中有多少条**没有**走规则的网关。域名来自 DNS watcher 最近 2 小时看到的 DNS 回答，防火墙上用的是哪种 DNS 服务都可以。如果一条连接的 pf 状态是由 App Router 的 route-to 规则建立的，就算作已分流。常见的泄漏原因有两种：
+
+- **IP 未学到**：设备从 App Router 看不到的 DNS 回答里拿到了地址。例如设备用了自己的 DNS 或 DoH（浏览器的"安全 DNS"、iCloud 专用代理），或者用的是规则建立之前就缓存下来的结果。
+- **旧连接**：这条连接是在 IP 学到之前就建立的。
+
+Status 页还会提醒：如果某条已启用的规则绑定的接口已经不存在或被禁用，这条规则不会生成任何防火墙规则。
+
 ### 列表源
 
 AppRouter 按计划定时下载域名和 CIDR 列表。在 **List Sources** 标签页中配置源地址和更新间隔。点击 **Update Lists Now** 立即更新，点击 **Force Full Update** 跳过 ETag 缓存强制刷新。

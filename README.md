@@ -203,6 +203,15 @@ Notes:
 - `china_all` is an IP list, so it has no domains to forward.
 - **DNS servers in front of Unbound (AdGuard Home, Pi-hole):** they must forward these domains to Unbound, otherwise they resolve the domains themselves. The domain list is in `/usr/local/etc/app-router/dns_via_gateway.txt`. In AdGuard Home add one upstream line per domain, e.g. `[/iqiyi.com/]127.0.0.1:53530` (Unbound's port). Domain-specific upstreams for the same domain are combined, so remove that domain from any other upstream list.
 
+### Leak Check
+
+**Status → Run Leak Check** lists, per rule, the current connections of the rule's clients to the rule's domains and how many of them did **not** go through the rule's gateway. Host names come from the DNS answers the DNS watcher saw in the last 2 hours (any resolver on the firewall). A connection counts as routed when its pf state was created by an App Router route-to rule. Typical reasons for a leak:
+
+- **IP not learned:** the client got the address from a DNS answer App Router didn't see, for example its own DNS or DoH (browser "secure DNS", iCloud Private Relay), or an answer it cached before the rule existed.
+- **Old state:** the connection was opened before the IP was learned.
+
+The Status tab also warns about enabled rules whose interface no longer exists or is disabled, because such rules get no firewall rule at all.
+
 ### List Sources
 
 AppRouter downloads domain and CIDR lists on a schedule. Configure source URLs and update intervals in the **List Sources** tab. Click **Update Lists Now** for an immediate update or **Force Full Update** to bypass ETag caching.

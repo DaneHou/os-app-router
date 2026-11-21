@@ -206,6 +206,43 @@ class ServiceController extends ApiMutableServiceControllerBase
         return ['status' => $status];
     }
 
+    /**
+     * Problems with enabled rules that the firewall hook would silently skip.
+     * A rule bound to a missing or disabled interface gets no pf rule at all.
+     */
+    public static function ruleWarnings($mdl)
+    {
+        $warnings = [];
+        $ifaces = \OPNsense\Core\Config::getInstance()->object()->interfaces;
+        foreach ($mdl->rules->rule->iterateItems() as $uuid => $rule) {
+            if ((string)$rule->enabled !== '1') {
+                continue;
+            }
+            $name = (string)$rule->description ?: $uuid;
+            $if = (string)$rule->interface;
+            if ($if === '' || !isset($ifaces->$if)) {
+                $warnings[] = sprintf(gettext('Rule "%s": interface "%s" does not exist, the rule is not active.'), $name, $if);
+            } elseif (empty((string)$ifaces->$if->enable) && $if !== 'lan') {
+                $warnings[] = sprintf(gettext('Rule "%s": interface "%s" is disabled, the rule is not active.'), $name, $if);
+            }
+        }
+        return $warnings;
+    }
+
+    /**
+     * GET /api/approuter/service/leakCheck
+     * Connections of rule clients to rule domains that did not go through the rule's gateway.
+     */
+    public function leakCheckAction()
+    {
+        $backend = new Backend();
+        $result = json_decode(trim($backend->configdRun('approuter leak_check')), true);
+        if (!is_array($result)) {
+            return ['status' => 'error', 'message' => gettext('Leak check failed')];
+        }
+        return $result;
+    }
+
     public function detailStatusAction()
     {
         $backend = new Backend();
@@ -364,6 +401,7 @@ class ServiceController extends ApiMutableServiceControllerBase
         }
         $data['recent_logs'] = $logs;
 
+        $data['warnings'] = self::ruleWarnings($mdl);
         return ['status' => 'ok', 'data' => $data];
     }
 }

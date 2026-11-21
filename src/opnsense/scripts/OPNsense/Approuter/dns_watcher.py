@@ -37,6 +37,10 @@ CLIENTS_DIR = Path(f"{APPROUTER_DIR}/clients")
 CIDRS_DIR = f"{APPROUTER_DIR}/cidrs"
 CONFIG_FILE = f"{APPROUTER_DIR}/config.json"
 SEEN_FILE = f"{APPROUTER_DIR}/ip_seen.json"
+# Recent DNS answers (ip -> name) for the leak check, written every minute
+NAMES_FILE = "/var/run/approuter_dns_names.json"
+NAMES_MAX_AGE = 7200
+NAMES_MAX_ENTRIES = 50000
 OPNSENSE_CONFIG = "/conf/config.xml"
 LOG_FILE = "/var/log/approuter_dns_watcher.log"
 LOG_MAX_BYTES = 5 * 1024 * 1024  # rotate once, keep a single .old copy
@@ -56,6 +60,9 @@ UNBOUND_ADDR = "127.0.0.1"
 UNBOUND_PORT = 53530
 
 domain_table_map = {}
+# ip -> (query name, last seen) from every sniffed A answer
+recent_names = {}
+recent_names_lock = threading.Lock()
 # Serialises active resolution (initial, SIGHUP, periodic loop)
 _resolve_lock = threading.Lock()
 # Runtime settings from config.json (reloaded on SIGHUP)
@@ -608,6 +615,40 @@ def get_active_gw_tables_for(table):
         return {t for t in active_gw_tables if t.startswith(table + '_gw')}
 
 
+def record_names(query_domain, answer_ips, now=None):
+    """Remember which name each answered IP belongs to (leak check)."""
+    now = now or time.time()
+    with recent_names_lock:
+        for ip in answer_ips:
+            recent_names[ip] = (query_domain, now)
+
+
+def dump_names(path=None, now=None):
+    """Drop old/excess entries and write the ip -> name map atomically."""
+    path = path or NAMES_FILE
+    now = now or time.time()
+    with recent_names_lock:
+        for ip in [ip for ip, (_n, ts) in recent_names.items() if now - ts > NAMES_MAX_AGE]:
+            del recent_names[ip]
+        if len(recent_names) > NAMES_MAX_ENTRIES:
+            for ip, _v in sorted(recent_names.items(), key=lambda kv: kv[1][1])[:len(recent_names) - NAMES_MAX_ENTRIES]:
+                del recent_names[ip]
+        data = json.dumps({"updated": int(now), "names": recent_names})
+    tmp = path + ".tmp"
+    with open(tmp, "w") as f:
+        f.write(data)
+    os.replace(tmp, path)
+
+
+def names_loop():
+    while True:
+        time.sleep(60)
+        try:
+            dump_names()
+        except Exception as e:
+            log(f"Could not write {NAMES_FILE}: {e}", syslog.LOG_ERR)
+
+
 def process_sniffed_dns(query_domain, answer_ips):
     """Process a sniffed DNS response: match domain, add IPs to all matching pf tables."""
     tables = match_domain(query_domain)
@@ -687,6 +728,7 @@ def sniff_interface(iface):
                 answer_ips = ANSWER_RE.findall(line)
 
                 if answer_ips:
+                    record_names(query_domain, answer_ips)
                     process_sniffed_dns(query_domain, answer_ips)
 
         except Exception as e:
@@ -904,6 +946,9 @@ def main():
 
         # Routes for "Resolve DNS via gateway"
         threading.Thread(target=dns_route_loop, daemon=True).start()
+
+        # ip -> name map for the leak check
+        threading.Thread(target=names_loop, daemon=True).start()
 
         # Main thread stays alive
         try:

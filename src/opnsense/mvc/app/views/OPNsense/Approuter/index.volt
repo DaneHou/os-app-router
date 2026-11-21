@@ -428,6 +428,14 @@
                     var html = '';
                     function esc(s) { return $('<span>').text(s).html(); }
 
+                    if (info.warnings && info.warnings.length) {
+                        html += '<div class="alert alert-warning">';
+                        for (var w = 0; w < info.warnings.length; w++) {
+                            html += '<div><i class="fa fa-exclamation-triangle"></i> ' + esc(info.warnings[w]) + '</div>';
+                        }
+                        html += '</div>';
+                    }
+
                     // Service status
                     html += '<h4>{{ lang._("Service") }}</h4>';
                     html += '<table class="table table-condensed table-striped">';
@@ -551,6 +559,44 @@
 
         $("#refreshStatusAct").click(function() {
             loadStatus();
+        });
+
+        // Leak check: rule-domain connections that did not use the rule's gateway
+        $("#leakCheckAct").click(function() {
+            var btn = $(this);
+            btn.prop('disabled', true);
+            $("#leakCheckResult").html('<p>{{ lang._("Checking...") }}</p>');
+            ajaxGet(url="/api/approuter/service/leakCheck", sendData={}, callback=function(data, status) {
+                btn.prop('disabled', false);
+                function esc(s) { return $('<span>').text(s == null ? '' : s).html(); }
+                if (!data || !data.rules) {
+                    $("#leakCheckResult").html('<div class="alert alert-danger">' + esc(data && data.message ? data.message : '{{ lang._("Leak check failed") }}') + '</div>');
+                    return;
+                }
+                var html = '';
+                if (data.message) {
+                    html += '<div class="alert alert-warning">' + esc(data.message) + '</div>';
+                }
+                html += '<p class="text-muted">' + esc(data.states) + ' {{ lang._("states checked") }}, ' +
+                    esc(data.known_names) + ' {{ lang._("host names known from DNS (last 2 h)") }}</p>';
+                html += '<table class="table table-condensed table-striped"><thead><tr>' +
+                    '<th>{{ lang._("Rule") }}</th><th>{{ lang._("Routed") }}</th><th>{{ lang._("Leaked") }}</th></tr></thead><tbody>';
+                $.each(data.rules, function(i, r) {
+                    var leaked = r.leaked > 0 ? '<span class="label label-danger">' + esc(r.leaked) + '</span>' : '<span class="label label-success">0</span>';
+                    html += '<tr><td>' + esc(r.rule) + '</td><td>' + esc(r.routed) + '</td><td>' + leaked + '</td></tr>';
+                    if (r.leaks && r.leaks.length) {
+                        html += '<tr><td colspan="3"><table class="table table-condensed" style="margin:0;font-size:12px">' +
+                            '<tr><th>{{ lang._("Client") }}</th><th>{{ lang._("Host") }}</th><th>{{ lang._("Destination") }}</th><th>{{ lang._("Reason") }}</th></tr>';
+                        $.each(r.leaks, function(j, l) {
+                            html += '<tr><td>' + esc(l.client) + '</td><td>' + esc(l.host) + '</td><td>' + esc(l.dst + ':' + l.port + '/' + l.proto) +
+                                '</td><td>' + esc(l.reason) + '</td></tr>';
+                        });
+                        html += '</table></td></tr>';
+                    }
+                });
+                html += '</tbody></table>';
+                $("#leakCheckResult").html(html);
+            });
         });
     });
 </script>
@@ -690,6 +736,13 @@
                 <button class="btn btn-default" id="refreshStatusAct" type="button">
                     <b>{{ lang._('Refresh') }}</b> <i class="fa fa-refresh"></i>
                 </button>
+                <hr />
+                <h4>{{ lang._('Leak Check') }}</h4>
+                <p class="text-muted">{{ lang._('Current connections from rule clients to rule domains that did not go through the rule gateway.') }}</p>
+                <button class="btn btn-default" id="leakCheckAct" type="button">
+                    <b>{{ lang._('Run Leak Check') }}</b> <i class="fa fa-search"></i>
+                </button>
+                <div id="leakCheckResult" style="margin-top:1em"></div>
             </div>
         </div>
     </div>
