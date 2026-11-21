@@ -66,6 +66,12 @@ run_case('first_rule_wins', function ($check) use ($GW, $MAP) {
     $check('overlap warned', count(preg_grep('/qy\.net already resolved/', $p['warnings'])) === 1);
 });
 
+run_case('shared_domains_same_dns', function ($check) use ($GW, $MAP) {
+    $p = ar_plan([rule(), rule(['uuid' => U2, 'description' => 'wg-mbp'])], $MAP, $GW);
+    $check('no warnings', $p['warnings'] === []);
+    $check('one route', count($p['routes']) === 1);
+});
+
 run_case('dns_server_gateway_conflict', function ($check) use ($GW, $MAP) {
     $p = ar_plan([rule(), rule(['uuid' => U2, 'description' => 'other', 'categories' => ['video.youku'], 'gateway' => 'WAN2'])], $MAP, $GW);
     $check('second rule skipped', !isset($p['zones']['youku.com']));

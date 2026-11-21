@@ -11,7 +11,7 @@ from conftest import ROOT, SCRIPTS, load_script
 from test_php_hook import php_command
 
 PHP_SCRIPT = os.path.join("tests", "php", "test_dns_forward.php")
-PHP_CASES = ["basic_plan", "custom_domains_and_china_all", "first_rule_wins",
+PHP_CASES = ["basic_plan", "custom_domains_and_china_all", "first_rule_wins", "shared_domains_same_dns",
              "dns_server_gateway_conflict", "invalid_inputs", "domain_cap", "render"]
 
 

@@ -114,6 +114,8 @@ function ar_plan(array $rules, array $mappings, array $gateways, $prefix = 'appr
                 if (isset($zones[$d])) {
                     if ($zones[$d] !== $dns) {
                         $warnings[] = "rule {$name}: {$d} already resolved via {$zones[$d]} by an earlier rule";
+                    } else {
+                        $added++;   // same domain, same DNS server: covered by an earlier rule
                     }
                     continue;
                 }
