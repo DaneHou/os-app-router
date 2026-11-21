@@ -141,6 +141,24 @@ CIDRs:   203.0.113.10
 
 优先级最高且探测通过的网关成为活跃网关；若失败，则尝试下一个；最后一个网关始终作为兜底。
 
+### 经网关解析 DNS
+
+有些网站是按 **DNS 解析器所在的位置**来分配服务器的。在海外解析国内网站，拿到的是海外 CDN 节点。这个节点可能把你跳转到国际版（例如 m.iqiyi.com 的搜索会跳到 www.iq.com），也可能直接拒绝服务，即使你的流量本身已经走了网关。
+
+在规则里勾选 **Resolve DNS via Gateway**，这条规则的域名（它的分类和自定义域名）就会经规则的第一个网关来解析：
+
+- App Router 会写出 Unbound 的 forward-zone 配置（`/usr/local/etc/unbound.opnsense.d/approuter_dns.conf`），通过 TCP 把这些域名交给规则里设置的 **DNS Server** 查询（默认 223.6.6.6，阿里 DNS）。
+- 它会给这个 DNS 服务器加一条经网关的主机路由。隧道接口重建后路由会丢失，`dns_watcher` 会在一分钟内把它补回来。
+- 只有生成的 forward-zone 发生变化时才会重启 Unbound，而且新文件必须先通过 `unbound-checkconf` 检查。
+
+注意：
+
+- DNS 是全局生效的：所有通过 Unbound 解析这些域名的客户端，拿到的都是网关那一侧的结果，不只是这条规则的来源设备。
+- 解析会稍慢一些，网关断开期间这些域名会解析失败。
+- 请选一个其他 DNS 设置没有用到的服务器，因为发往这个地址的所有流量都会走网关。如果两条规则用了同一个 DNS 服务器、却指向不同网关，后面那条会被跳过。同一个域名出现在多条规则里时，以第一条为准。
+- `china_all` 是 IP 列表，没有域名可以转发。
+- **Unbound 前面还有其他 DNS 服务（AdGuard Home、Pi-hole）时：**它们必须把这些域名转给 Unbound，否则会自己去解析。域名清单在 `/usr/local/etc/app-router/dns_via_gateway.txt`。在 AdGuard Home 里为每个域名加一行上游，例如 `[/iqiyi.com/]127.0.0.1:53530`（Unbound 的端口）。AdGuard 对同一个域名的多条上游会合并使用，所以要把这个域名从其他上游列表里去掉。
+
 ### 列表源
 
 AppRouter 按计划定时下载域名和 CIDR 列表。在 **List Sources** 标签页中配置源地址和更新间隔。点击 **Update Lists Now** 立即更新，点击 **Force Full Update** 跳过 ETag 缓存强制刷新。

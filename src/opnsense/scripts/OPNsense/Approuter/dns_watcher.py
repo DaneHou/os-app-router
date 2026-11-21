@@ -506,6 +506,28 @@ def expire_loop():
             log(f"Expiry error: {e}", syslog.LOG_ERR)
 
 
+DNS_ROUTE_CHECK_INTERVAL = 60
+
+
+def dns_route_loop():
+    """Keep "Resolve DNS via gateway" host routes in place (dns_routes.py).
+
+    Tunnel gateways recreate their interface, which drops the route.
+    """
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    try:
+        import dns_routes
+    except ImportError as e:
+        log(f"dns_routes unavailable: {e}", syslog.LOG_WARNING)
+        return
+    while True:
+        try:
+            dns_routes.ensure_routes(logger=log)
+        except Exception as e:
+            log(f"DNS route check error: {e}", syslog.LOG_ERR)
+        time.sleep(DNS_ROUTE_CHECK_INTERVAL)
+
+
 def kill_stale_states(new_ips, client_ips):
     """Kill existing pf states so new connections use the route-to rule."""
     if not new_ips or not client_ips:
@@ -811,6 +833,9 @@ def main():
 
         # Age out learned IPs that DNS no longer returns
         threading.Thread(target=expire_loop, daemon=True).start()
+
+        # Routes for "Resolve DNS via gateway"
+        threading.Thread(target=dns_route_loop, daemon=True).start()
 
         # Main thread stays alive
         try:

@@ -72,10 +72,13 @@ install-plugin:
 	@cp src/opnsense/scripts/OPNsense/Approuter/geo_prober.py $(PLUGIN_SCRIPTS)/
 	@cp src/opnsense/scripts/OPNsense/Approuter/table_manager.sh $(PLUGIN_SCRIPTS)/
 	@cp src/opnsense/scripts/OPNsense/Approuter/static_sync.py $(PLUGIN_SCRIPTS)/
+	@cp src/opnsense/scripts/OPNsense/Approuter/dns_routes.py $(PLUGIN_SCRIPTS)/
+	@cp src/opnsense/scripts/OPNsense/Approuter/dns_forward.php $(PLUGIN_SCRIPTS)/
 	@cp src/opnsense/scripts/OPNsense/Approuter/diagnose.sh $(PLUGIN_SCRIPTS)/
 	@cp src/opnsense/scripts/OPNsense/Approuter/app_categories.json $(PLUGIN_SCRIPTS)/
 	@chmod +x $(PLUGIN_SCRIPTS)/*.py
 	@chmod +x $(PLUGIN_SCRIPTS)/*.sh
+	@chmod +x $(PLUGIN_SCRIPTS)/dns_forward.php
 	@# configd actions
 	@mkdir -p $(PLUGIN_SERVICE)/conf/actions.d
 	@cp src/opnsense/service/conf/actions.d/actions_approuter.conf \
@@ -135,6 +138,12 @@ uninstall:
 		rm -f /var/run/approuter_dns_watcher.pid; \
 	fi
 	@pkill -f 'dns_watcher.py' 2>/dev/null || true
+	@# "Resolve DNS via gateway": routes and Unbound forward-zones
+	@/usr/local/opnsense/scripts/OPNsense/Approuter/dns_routes.py cleanup 2>/dev/null || true
+	@if [ -f /usr/local/etc/unbound.opnsense.d/approuter_dns.conf ]; then \
+		rm -f /usr/local/etc/unbound.opnsense.d/approuter_dns.conf /var/unbound/etc/approuter_dns.conf; \
+		configctl unbound restart >/dev/null 2>&1 || true; \
+	fi
 	@# Stop Geo prober if running
 	@if [ -f /var/run/approuter_geo_prober.pid ]; then \
 		kill `cat /var/run/approuter_geo_prober.pid` 2>/dev/null || true; \

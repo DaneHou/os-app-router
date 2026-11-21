@@ -185,6 +185,24 @@ a prober that was down longer, start in fallback mode and need 3 passing probes 
 
 The first gateway in priority order that passes the probe becomes active. If it fails, the next gateway is tried. The last gateway always acts as fallback.
 
+### Resolve DNS via Gateway
+
+Some sites pick their server by the location of the **DNS resolver**: a China site resolved from abroad hands out an overseas CDN edge, and that edge may redirect to the international site (e.g. m.iqiyi.com search → www.iq.com) or refuse service, even though the traffic itself goes through the gateway.
+
+Tick **Resolve DNS via Gateway** in a rule to resolve the rule's domains (its categories and custom domains) through the rule's first gateway:
+
+- App Router writes Unbound forward-zones (`/usr/local/etc/unbound.opnsense.d/approuter_dns.conf`) that send these domains to the rule's **DNS Server** over TCP (default 223.6.6.6, AliDNS).
+- It adds a host route for that DNS server through the gateway, and `dns_watcher` re-adds it within a minute when a tunnel interface is recreated.
+- Unbound is restarted only when the generated zones change. The file must pass `unbound-checkconf` first.
+
+Notes:
+
+- DNS is global: every client that resolves these domains through Unbound gets the gateway-side answer, not just the rule's sources.
+- Lookups take a little longer, and they fail while the gateway is down.
+- Choose a DNS server your other DNS settings don't use, because all traffic to that address goes through the gateway. If two rules use the same server with different gateways, the later rule is skipped. If a domain is in several rules, the first rule wins.
+- `china_all` is an IP list, so it has no domains to forward.
+- **DNS servers in front of Unbound (AdGuard Home, Pi-hole):** they must forward these domains to Unbound, otherwise they resolve the domains themselves. The domain list is in `/usr/local/etc/app-router/dns_via_gateway.txt`. In AdGuard Home add one upstream line per domain, e.g. `[/iqiyi.com/]127.0.0.1:53530` (Unbound's port). Domain-specific upstreams for the same domain are combined, so remove that domain from any other upstream list.
+
 ### List Sources
 
 AppRouter downloads domain and CIDR lists on a schedule. Configure source URLs and update intervals in the **List Sources** tab. Click **Update Lists Now** for an immediate update or **Force Full Update** to bypass ETag caching.

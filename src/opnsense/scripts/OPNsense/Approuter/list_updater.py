@@ -531,6 +531,20 @@ def signal_dns_watcher():
         log(f"Could not signal dns_watcher: {e}", syslog.LOG_WARNING)
 
 
+def run_dns_forward():
+    """Regenerate "Resolve DNS via gateway" forward-zones and routes (dns_forward.php).
+
+    Restarts Unbound only when the generated zones changed.
+    """
+    script = "/usr/local/opnsense/scripts/OPNsense/Approuter/dns_forward.php"
+    if not os.path.exists(script):
+        return
+    try:
+        subprocess.run([script], capture_output=True, timeout=120)
+    except (subprocess.TimeoutExpired, OSError) as e:
+        log(f"dns_forward failed: {e}", syslog.LOG_ERR)
+
+
 def update_tables():
     script = "/usr/local/opnsense/scripts/OPNsense/Approuter/table_manager.sh"
     if os.path.exists(script):
@@ -592,6 +606,7 @@ def full_update(config, state, categories, prefix, force=False):
     save_state(state)
     if force or updated or v2fly_merged:
         update_tables()
+    run_dns_forward()
 
 
 def main():
@@ -617,6 +632,7 @@ def main():
                               config=config)
         process_custom_categories(config, prefix)
         signal_dns_watcher()
+        run_dns_forward()
         log("DNS configs regenerated")
 
     elif action == "status":

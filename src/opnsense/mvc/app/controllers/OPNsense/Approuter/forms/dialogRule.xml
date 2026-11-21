@@ -44,6 +44,24 @@ IPs/subnets: type and press Enter (192.168.1.0/24, 10.0.0.5). Aliases are refere
         <help>Comma-separated domains (e.g. example.com, cdn.test.org). All subdomains matched automatically.</help>
     </field>
     <field>
+        <id>rule.dnsViaGateway</id>
+        <label>Resolve DNS via Gateway</label>
+        <type>checkbox</type>
+        <help><![CDATA[Resolve the domains of this rule (categories and custom domains) through the rule's first gateway, using the DNS server below.<br/>
+Use it when a site still sends you to its international version, or refuses service, although its traffic goes through the gateway: many CDNs choose the server by the location of the DNS resolver, not of the client.<br/>
+<ul>
+<li>Applies to all clients that resolve these domains through Unbound, not only to this rule's sources.</li>
+<li>Lookups take a little longer and fail while the gateway is down.</li>
+<li>DNS servers in front of Unbound (e.g. AdGuard Home) must forward these domains to Unbound; the list is in /usr/local/etc/app-router/dns_via_gateway.txt.</li>
+</ul>]]></help>
+    </field>
+    <field>
+        <id>rule.dnsServer</id>
+        <label>DNS Server</label>
+        <type>text</type>
+        <help>Public DNS server in the gateway's region, queried over TCP port 53, e.g. 223.6.6.6 (AliDNS) or 119.29.29.29 (DNSPod) for China. App Router routes this address through the gateway, so pick one your other DNS settings don't use.</help>
+    </field>
+    <field>
         <id>rule.gateway</id>
         <label>Gateway</label>
         <type>select_multiple</type>

@@ -106,6 +106,17 @@
                     <Mask>/^[a-z0-9_.,\-]*$/i</Mask>
                     <ValidationMessage>Enter comma-separated domains</ValidationMessage>
                 </customDomains>
+                <dnsViaGateway type="BooleanField">
+                    <Default>0</Default>
+                    <Required>Y</Required>
+                </dnsViaGateway>
+                <dnsServer type="NetworkField">
+                    <Default>223.6.6.6</Default>
+                    <Required>N</Required>
+                    <NetMaskAllowed>N</NetMaskAllowed>
+                    <AddressFamily>ipv4</AddressFamily>
+                    <ValidationMessage>Enter an IPv4 address</ValidationMessage>
+                </dnsServer>
                 <interface type="InterfaceField">
                     <Required>Y</Required>
                     <Default>lan</Default>
