@@ -75,7 +75,7 @@ rm -rf /usr/local/etc/app-router
 |------|------|
 | Description | 规则名称 |
 | Interface | 入站接口（通常选 LAN） |
-| Source | 客户端过滤：`any`、单个 IP、子网或逗号分隔列表 |
+| Source | 客户端过滤：`any`、IP/子网和/或防火墙别名（Host、Network、MAC 地址等），可混用 |
 | App Categories | 一个或多个内置/自定义分类 |
 | Custom Domains | 仅用于此规则的额外域名，自动匹配子域名 |
 | Gateway | 目标网关——选择多个可启用智能网关 |

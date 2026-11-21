@@ -75,7 +75,7 @@ Each rule routes traffic from a source (LAN clients) to a gateway based on categ
 |-------|-------------|
 | Description | Human-readable name for the rule |
 | Interface | Inbound interface (typically LAN) |
-| Source | Client filter: `any`, single IP, subnet, or comma-separated list |
+| Source | Client filter: `any`, IPs/subnets and/or firewall aliases (Host, Network, MAC address, ...), mixed freely |
 | App Categories | One or more built-in or custom categories |
 | Custom Domains | Extra domains for this rule only; subdomains auto-matched |
 | Gateway | Target gateway — select multiple to enable Smart Gateway |
@@ -96,7 +96,30 @@ any                              — all LAN clients
 192.168.1.100                   — single host
 192.168.1.0/24                  — subnet
 192.168.1.0/24,10.0.0.5         — mixed
+Kids_Phones                     — firewall alias (e.g. a MAC address alias)
+Kids_Phones,10.10.0.4           — alias + WireGuard peer IP
 ```
+
+**Aliases as source.** The Source field offers every address alias from
+*Firewall ‣ Aliases* (all types except Port). The generated rules reference
+the alias' pf table directly (`from <Kids_Phones>`), so later changes to the
+alias, or new IPs a MAC alias resolves, apply without touching the rule or
+pressing Apply. IPs/subnets of a rule still go into its own
+`<prefix>_clients_<hash>` table. Caveats for **MAC address** aliases:
+
+- Core resolves MACs to IPs from the ARP/NDP table on its alias refresh
+  cycle, so a device is matched only after it has talked to the firewall and
+  the alias was refreshed (seconds to a few minutes after it joins or
+  changes IP).
+- Apple devices (and recent Android/Windows) use a *private Wi-Fi address*
+  per network, which differs from the hardware MAC and can rotate. Use the
+  MAC shown for that network (or turn private address off / set it to
+  "Fixed").
+- Rules are IPv4 only; IPv6 addresses resolved for a MAC are ignored.
+- WireGuard/VPN clients have no MAC on the firewall: list their tunnel IPs.
+- An unknown alias name is logged (`approuter: ... source ... ignored`) and
+  skipped; a rule with no valid source is not generated at all (never
+  widened to `any`).
 
 ### Custom Categories
 
@@ -138,6 +161,12 @@ Smart Gateway enables automatic failover between multiple gateways by probing co
 4. Set **Probe URL** (`http://` or `https://` only, default `https://www.google.com`) and **Probe Interval** (30–3600 seconds)
 
 A gateway switches after 3 consistent probe results, with at most one switch per 5 minutes.
+
+Gateway decisions are saved in `/usr/local/etc/app-router/smart_gateway_persist.json` when the prober
+stops. **Apply** restarts the prober; rules whose gateways, categories and probe settings are unchanged
+resume their previous decision (the `_gwN` tables are refreshed from the main table instead of being
+flushed), as long as the saved state is younger than `max(2 x probe interval, 10 min)`. Changed rules, or
+a prober that was down longer, start in fallback mode and need 3 passing probes again.
 
 The first gateway in priority order that passes the probe becomes active. If it fails, the next gateway is tried. The last gateway always acts as fallback.
 

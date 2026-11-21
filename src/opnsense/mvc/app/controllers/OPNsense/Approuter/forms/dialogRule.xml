@@ -18,8 +18,10 @@
     <field>
         <id>rule.sourceNets</id>
         <label>Source</label>
-        <type>text</type>
-        <help>Enter "any" or comma-separated IPs/subnets (e.g. 192.168.1.0/24, 10.0.0.5)</help>
+        <type>select_multiple</type>
+        <style>tokenize</style>
+        <allownew>true</allownew>
+        <help>"any", IPs/subnets (type and press Enter, e.g. 192.168.1.0/24, 10.0.0.5) and/or firewall aliases (pick from the list; Host, Network and MAC address aliases all work). Aliases are referenced as pf tables, so changes to an alias apply without touching the rule. MAC aliases only match once the device's IP is in the ARP table and only for the MAC the device actually uses (turn off Private Wi-Fi Address on Apple devices or add that MAC). IPv4 only. WireGuard peers have no MAC: use their tunnel IP.</help>
     </field>
     <field>
         <id>rule.categories</id>

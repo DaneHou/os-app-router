@@ -45,30 +45,117 @@ function approuter_firewall(\OPNsense\Firewall\Plugin $fw)
         mkdir($clientsDir, 0750, true);
     }
 
-    $categoriesNeeded = [];
     $rules = [];
-
     foreach ($mdl->rules->rule->iterateItems() as $uuid => $rule) {
         if ((string)$rule->enabled !== '1') {
             continue;
-        }
-        $ruleCategories = explode(',', (string)$rule->categories);
-        foreach ($ruleCategories as $cat) {
-            $cat = trim($cat);
-            if (!empty($cat)) {
-                $categoriesNeeded[$cat] = true;
-            }
         }
         $rules[] = [
             'uuid' => $uuid,
             'description' => (string)$rule->description,
             'sourceNets' => (string)$rule->sourceNets,
-            'categories' => $ruleCategories,
+            'categories' => explode(',', (string)$rule->categories),
             'customDomains' => (string)$rule->customDomains,
             'gateway' => (string)$rule->gateway,
             'interface' => (string)$rule->interface,
             'smartGateway' => (string)$rule->smartGateway,
         ];
+    }
+
+    $valid = approuter_register_rules($fw, $rules, $tablePrefix, $clientsDir, approuter_alias_names());
+    approuter_cleanup_orphan_tables($tablePrefix, $valid);
+}
+
+/**
+ * Names of firewall aliases that resolve to addresses (every type but "port").
+ * Core keeps each of them in a pf table of the same name; MAC aliases are
+ * filled with the IPs currently seen for those MACs (ARP/NDP).
+ * Returns null when the Alias model can't be read: names are then accepted
+ * on syntax only (an unknown table in a rule is simply empty in pf).
+ */
+function approuter_alias_names()
+{
+    try {
+        $names = [];
+        foreach ((new \OPNsense\Firewall\Alias())->aliases->alias->iterateItems() as $alias) {
+            if ((string)$alias->type !== 'port') {
+                $names[] = (string)$alias->name;
+            }
+        }
+        return $names;
+    } catch (\Throwable $e) {
+        syslog(LOG_WARNING, 'approuter: cannot read firewall aliases: ' . $e->getMessage());
+        return null;
+    }
+}
+
+/**
+ * IP address or CIDR (v4 or v6)?
+ */
+function approuter_is_net($entry)
+{
+    $parts = explode('/', $entry, 2);
+    if (filter_var($parts[0], FILTER_VALIDATE_IP) === false) {
+        return false;
+    }
+    if (count($parts) === 1) {
+        return true;
+    }
+    $max = strpos($parts[0], ':') !== false ? 128 : 32;
+    return ctype_digit($parts[1]) && (int)$parts[1] <= $max;
+}
+
+/**
+ * Split a rule's source list into "any", plain IPs/CIDRs and alias names.
+ * @param string $sourceNets comma separated source list
+ * @param array|null $aliasNames known address aliases (null = don't check existence)
+ * @return array ['any' => bool, 'nets' => [], 'aliases' => [], 'invalid' => []]
+ */
+function approuter_parse_sources($sourceNets, $aliasNames = null)
+{
+    $result = ['any' => false, 'nets' => [], 'aliases' => [], 'invalid' => []];
+    foreach (explode(',', (string)$sourceNets) as $entry) {
+        $entry = trim($entry);
+        if ($entry === '') {
+            continue;
+        }
+        if (strtolower($entry) === 'any') {
+            $result['any'] = true;
+        } elseif (approuter_is_net($entry)) {
+            if (!in_array($entry, $result['nets'], true)) {
+                $result['nets'][] = $entry;
+            }
+        } elseif (
+            preg_match('/^[A-Za-z0-9_]{1,32}$/', $entry) &&
+            ($aliasNames === null || in_array($entry, $aliasNames, true))
+        ) {
+            if (!in_array($entry, $result['aliases'], true)) {
+                $result['aliases'][] = $entry;
+            }
+        } else {
+            $result['invalid'][] = $entry;
+        }
+    }
+    return $result;
+}
+
+/**
+ * Register tables and route-to rules for the given (enabled) rules.
+ * Plain IPs/CIDRs of a rule go into a file-backed <prefix>_clients_<hash>
+ * table; alias sources are referenced directly as <alias> so pf follows the
+ * alias contents (e.g. MAC aliases re-resolved via ARP) without a reload.
+ * @return array valid client files/tables, custom tables and _gwN tables
+ */
+function approuter_register_rules($fw, array $rules, $tablePrefix, $clientsDir, $aliasNames = null)
+{
+    $categoriesNeeded = [];
+    foreach ($rules as $rule) {
+        foreach ($rule['categories'] as $cat) {
+            $cat = trim($cat);
+            if (!empty($cat)) {
+                $categoriesNeeded[$cat] = true;
+            }
+        }
     }
 
     // Collect smart gateway info per category for registering _gwN tables
@@ -106,8 +193,9 @@ function approuter_firewall(\OPNsense\Firewall\Plugin $fw)
         }
     }
 
-    // Track valid client file basenames and custom table names for orphan cleanup
+    // Track valid client files/tables and custom table names for orphan cleanup
     $validClientFiles = [];
+    $validClientTables = [];
     $validCustomTables = [];
 
     // Defaults required by OPNsense's FilterRule compiler (type, ipprotocol, etc.)
@@ -121,26 +209,46 @@ function approuter_firewall(\OPNsense\Firewall\Plugin $fw)
     // Generate pf filter rules
     $priority = 1;
     foreach ($rules as $rule) {
-        $sourceNets = array_filter(array_map('trim', explode(',', $rule['sourceNets'])));
-        if (empty($sourceNets)) {
-            continue;
+        $label = $rule['description'] ?: $rule['uuid'];
+        $sources = approuter_parse_sources($rule['sourceNets'], $aliasNames);
+        foreach ($sources['invalid'] as $bad) {
+            syslog(LOG_WARNING, "approuter: rule '{$label}': source '{$bad}' is not an IP/subnet or address alias, ignored");
         }
 
-        // Check if source is "any"
-        $isAny = (count($sourceNets) === 1 && strtolower($sourceNets[0]) === 'any');
-
         $fromClause = 'any';
-        if (!$isAny) {
+        if (!$sources['any']) {
             $clientTableName = $tablePrefix . '_clients_' . substr(md5($rule['uuid']), 0, 8);
-            $clientFile = $clientsDir . '/' . $clientTableName . '.txt';
-            $written = file_put_contents($clientFile, implode("\n", $sourceNets) . "\n");
-            if ($written === false) {
-                syslog(LOG_ERR, "approuter: failed to write client file $clientFile");
+            $froms = [];
+            if (!empty($sources['nets'])) {
+                $clientFile = $clientsDir . '/' . $clientTableName . '.txt';
+                $written = file_put_contents($clientFile, implode("\n", $sources['nets']) . "\n");
+                if ($written === false) {
+                    syslog(LOG_ERR, "approuter: failed to write client file $clientFile");
+                }
+                // core signature is registerTable($name, $persist, $file)
+                $fw->registerTable($clientTableName, true, $clientFile);
+                $validClientFiles[] = $clientTableName . '.txt';
+                $validClientTables[] = $clientTableName;
+                $froms[] = '<' . $clientTableName . '>';
             }
-            // core signature is registerTable($name, $persist, $file)
-            $fw->registerTable($clientTableName, true, $clientFile);
-            $validClientFiles[] = $clientTableName . '.txt';
-            $fromClause = '<' . $clientTableName . '>';
+            if (!empty($sources['aliases'])) {
+                // alias names for dns_watcher (state kills); pf reads the alias tables itself
+                $aliasFile = $clientsDir . '/' . $clientTableName . '.aliases';
+                if (file_put_contents($aliasFile, implode("\n", $sources['aliases']) . "\n") === false) {
+                    syslog(LOG_ERR, "approuter: failed to write alias file $aliasFile");
+                }
+                $validClientFiles[] = $clientTableName . '.aliases';
+                foreach ($sources['aliases'] as $alias) {
+                    $froms[] = '<' . $alias . '>';
+                }
+            }
+            if (empty($froms)) {
+                // never fall back to "any" for a rule whose sources are all invalid
+                syslog(LOG_WARNING, "approuter: rule '{$label}' has no valid source, skipped");
+                continue;
+            }
+            // core expands a comma separated "from" into one pf rule per source
+            $fromClause = implode(',', $froms);
         }
 
         // array_values: array_filter keeps keys, $gateways[0] must exist
@@ -279,8 +387,12 @@ function approuter_firewall(\OPNsense\Firewall\Plugin $fw)
         }
     }
 
-    // Clean up orphaned client table files from deleted rules
-    foreach (glob($clientsDir . '/' . $tablePrefix . '_clients_*.txt') as $file) {
+    // Clean up orphaned client table / alias files from deleted rules
+    $clientFiles = array_merge(
+        glob($clientsDir . '/' . $tablePrefix . '_clients_*.txt') ?: [],
+        glob($clientsDir . '/' . $tablePrefix . '_clients_*.aliases') ?: []
+    );
+    foreach ($clientFiles as $file) {
         if (!in_array(basename($file), $validClientFiles)) {
             @unlink($file);
         }
@@ -312,6 +424,23 @@ function approuter_firewall(\OPNsense\Firewall\Plugin $fw)
         }
     }
 
+    return [
+        'clientFiles' => $validClientFiles,
+        'clientTables' => $validClientTables,
+        'customTables' => $validCustomTables,
+        'gwTables' => $validGwTables,
+    ];
+}
+
+/**
+ * Remove pf tables of deleted rules (custom, client and _gwN tables).
+ */
+function approuter_cleanup_orphan_tables($tablePrefix, array $valid)
+{
+    $validClientTables = $valid['clientTables'];
+    $validCustomTables = $valid['customTables'];
+    $validGwTables = $valid['gwTables'];
+
     // Clean up orphaned custom/client/gw pf tables from deleted rules
     $pfTables = [];
     exec('/sbin/pfctl -s Tables 2>/dev/null', $pfTables);
@@ -331,7 +460,7 @@ function approuter_firewall(\OPNsense\Firewall\Plugin $fw)
                 exec('/sbin/pfctl -t ' . escapeshellarg($t) . ' -T kill 2>/dev/null');
                 syslog(LOG_NOTICE, "approuter: removed orphaned table $t");
             }
-        } elseif (preg_match('/_clients_[0-9a-f]{8}$/', $t) && !in_array($t . '.txt', $validClientFiles)) {
+        } elseif (preg_match('/_clients_[0-9a-f]{8}$/', $t) && !in_array($t, $validClientTables)) {
             exec('/sbin/pfctl -t ' . escapeshellarg($t) . ' -T flush 2>/dev/null');
             exec('/sbin/pfctl -t ' . escapeshellarg($t) . ' -T kill 2>/dev/null');
             syslog(LOG_NOTICE, "approuter: removed orphaned table $t");

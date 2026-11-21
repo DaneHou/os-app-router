@@ -57,7 +57,9 @@ class SettingsController extends ApiMutableModelControllerBase
         if (isset($result['rule'])) {
             // CSVListField may return an array of {value, selected} entries
             // instead of a plain string. Normalize text fields to strings.
-            $result['rule']['sourceNets'] = $this->extractCsvValue($result['rule']['sourceNets'] ?? '');
+            $result['rule']['sourceNets'] = $this->sourceOptions(
+                $this->extractCsvValue($result['rule']['sourceNets'] ?? '')
+            );
             $result['rule']['customDomains'] = $this->extractCsvValue($result['rule']['customDomains'] ?? '');
 
             // Augment gateway: CSVListField → multi-select with ordering
@@ -142,6 +144,41 @@ class SettingsController extends ApiMutableModelControllerBase
         }
 
         return $result;
+    }
+
+    /**
+     * Options for the source tokenizer: "any", every address alias (all types
+     * but port, incl. MAC aliases) and the rule's current entries (IPs/CIDRs
+     * are free text, allownew). Keys are what gets stored.
+     */
+    private function sourceOptions($value)
+    {
+        $selected = array_values(array_filter(array_map('trim', explode(',', $value)), 'strlen'));
+        $options = [];
+        foreach ($selected as $entry) {
+            $options[$entry] = ['value' => $entry, 'selected' => 1];
+        }
+        if (!isset($options['any'])) {
+            $options['any'] = ['value' => 'any', 'selected' => 0];
+        }
+        try {
+            foreach ((new \OPNsense\Firewall\Alias())->aliases->alias->iterateItems() as $alias) {
+                $name = (string)$alias->name;
+                $type = (string)$alias->type;
+                if ($name === '' || $type === 'port') {
+                    continue;
+                }
+                $label = $name . ' (' . $type . ')';
+                if (isset($options[$name])) {
+                    $options[$name]['value'] = $label;
+                } else {
+                    $options[$name] = ['value' => $label, 'selected' => 0];
+                }
+            }
+        } catch (\Throwable $e) {
+            // alias model unavailable: keep current entries only
+        }
+        return $options;
     }
 
     /**

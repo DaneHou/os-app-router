@@ -82,3 +82,28 @@ def test_rule_interface_devices(dns_watcher, monkeypatch, tmp_path):
     monkeypatch.setattr(dns_watcher, "OPNSENSE_CONFIG", str(cfg))
     dns_watcher.settings["rules"] = [{"interface": "lan"}, {"interface": "opt1"}, {"interface": "missing"}]
     assert dns_watcher.rule_interface_devices() == ["igc1", "vlan0.10"]
+
+
+def test_client_ips_include_alias_sources(dns_watcher, tmp_path, monkeypatch):
+    clients = tmp_path / "clients"
+    clients.mkdir()
+    (clients / "approuter_clients_aaaaaaaa.txt").write_text("192.168.70.124/32\n10.10.0.4\n")
+    (clients / "approuter_clients_bbbbbbbb.aliases").write_text("Kids_MAC\nbad;name\nHuge\n")
+    monkeypatch.setattr(dns_watcher, "CLIENTS_DIR", clients)
+    pf = {"Kids_MAC": ["192.168.70.50", "192.168.70.51"],
+          "Huge": [f"10.1.{i // 256}.{i % 256}" for i in range(dns_watcher.MAX_ALIAS_CLIENTS + 1)]}
+    asked = []
+    monkeypatch.setattr(dns_watcher, "show_table", lambda t: asked.append(t) or pf.get(t))
+    assert dns_watcher.get_client_ips() == {
+        "192.168.70.124/32", "10.10.0.4/32", "192.168.70.50/32", "192.168.70.51/32"}
+    assert sorted(asked) == ["Huge", "Kids_MAC"]  # invalid names never reach pfctl
+
+
+def test_client_ips_alias_table_missing(dns_watcher, tmp_path, monkeypatch):
+    clients = tmp_path / "clients"
+    clients.mkdir()
+    (clients / "approuter_clients_bbbbbbbb.aliases").write_text("Gone\n")
+    monkeypatch.setattr(dns_watcher, "CLIENTS_DIR", clients)
+    monkeypatch.setattr(dns_watcher, "show_table", lambda t: None)
+    assert dns_watcher.get_client_ips() == set()
+

@@ -41,6 +41,9 @@ RESOLVE_INTERVAL = 300  # active resolution every 5 min (backup only)
 EXPIRE_CHECK_INTERVAL = 600  # how often to look for stale table entries
 DEFAULT_EXPIRE_HOURS = 24
 SMART_GW_STATE_FILE = "/usr/local/etc/app-router/smart_gateway_state.json"
+# firewall alias names usable as rule source (same rule as approuter.inc)
+ALIAS_NAME_RE = re.compile(r"^[A-Za-z0-9_]{1,32}$")
+MAX_ALIAS_CLIENTS = 256
 
 # Unbound listener — for active resolution fallback
 UNBOUND_ADDR = "127.0.0.1"
@@ -259,18 +262,39 @@ def match_domain(query_domain):
 
 
 def get_client_ips():
-    """Read client IPs/subnets from approuter client table files."""
+    """Read client IPs/subnets from approuter client table files.
+
+    Rules can also use firewall aliases as source (listed one per line in
+    <table>.aliases); those are expanded from the alias' pf table, which core
+    keeps current (MAC aliases are resolved via ARP).
+    """
     client_ips = set()
+
+    def add(entry):
+        # keep the prefix length: pfctl -k accepts networks, and
+        # stripping it would only match the network address itself
+        try:
+            client_ips.add(str(ipaddress.ip_network(entry.strip(), strict=False)))
+        except ValueError:
+            pass
+
     if CLIENTS_DIR.is_dir():
         for f in CLIENTS_DIR.glob("*_clients_*.txt"):
             for line in f.read_text().splitlines():
-                entry = line.strip()
-                # keep the prefix length: pfctl -k accepts networks, and
-                # stripping it would only match the network address itself
-                try:
-                    client_ips.add(str(ipaddress.ip_network(entry, strict=False)))
-                except ValueError:
-                    continue
+                add(line)
+        aliases = set()
+        for f in CLIENTS_DIR.glob("*_clients_*.aliases"):
+            aliases.update(n.strip() for n in f.read_text().splitlines()
+                           if ALIAS_NAME_RE.match(n.strip()))
+        for name in sorted(aliases):
+            entries = show_table(name) or []
+            if len(entries) > MAX_ALIAS_CLIENTS:
+                # state kills are per client x destination; skip huge aliases
+                log(f"Alias {name} has {len(entries)} entries, not used for state kills",
+                    syslog.LOG_WARNING)
+                continue
+            for entry in entries:
+                add(entry)
     return client_ips
 
 

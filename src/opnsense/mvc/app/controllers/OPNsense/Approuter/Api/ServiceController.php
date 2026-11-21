@@ -62,11 +62,20 @@ class ServiceController extends ApiMutableServiceControllerBase
             // Explicitly load client tables from files (OPNsense registerTable
             // creates persist tables but doesn't always load file contents).
             // Small delay to let async filter reload register the tables.
+            // Only IP/CIDR sources live in these files; alias sources are
+            // referenced as <alias> in the rules and kept current by core.
             sleep(2);
             $clientsDir = '/usr/local/etc/app-router/clients';
+            $pfTables = [];
+            exec('/sbin/pfctl -s Tables 2>/dev/null', $pfTables);
+            $pfTables = array_map('trim', $pfTables);
             if (is_dir($clientsDir)) {
-                foreach (glob($clientsDir . '/*.txt') as $clientFile) {
+                foreach (glob($clientsDir . '/*_clients_*.txt') as $clientFile) {
                     $tableName = basename($clientFile, '.txt');
+                    if (!in_array($tableName, $pfTables, true)) {
+                        // stale file of a deleted rule: don't recreate its table
+                        continue;
+                    }
                     $pfOut = [];
                     $pfRet = 0;
                     exec("/sbin/pfctl -t " . escapeshellarg($tableName) . " -T replace -f " . escapeshellarg($clientFile) . " 2>&1", $pfOut, $pfRet);
@@ -95,9 +104,6 @@ class ServiceController extends ApiMutableServiceControllerBase
             }
             // only touch tables that a rule actually uses (registered by the
             // firewall hook); pfctl -T replace would otherwise create them
-            $pfTables = [];
-            exec('/sbin/pfctl -s Tables 2>/dev/null', $pfTables);
-            $pfTables = array_map('trim', $pfTables);
             foreach ($slugs as $slug) {
                 if (empty($slug)) {
                     continue;
