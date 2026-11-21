@@ -29,6 +29,8 @@ STATE_RE = re.compile(
     r"^\S+\s+(?P<proto>tcp|udp)\s+(?P<a>\S+)(?:\s+\((?P<ainner>[^)]+)\))?\s+(?P<dir>->|<-)\s+"
     r"(?P<b>\S+)(?:\s+\((?P<binner>[^)]+)\))?")
 RULE_RE = re.compile(r"\brule (\d+)\b")
+BYTES_RE = re.compile(r"\b(\d+):(\d+) bytes\b")
+AGE_RE = re.compile(r"\bage (\d+):(\d+):(\d+)")
 RULE_LINE_RE = re.compile(r"^@(\d+)\s+(.*)$")
 
 
@@ -54,12 +56,19 @@ def parse_states(text):
             client, cport = split_hostport(src)
             dst, dport = split_hostport(dst)
             cur = {"proto": m.group("proto"), "client": client, "cport": cport,
-                   "dst": dst, "dport": dport, "rule": None}
+                   "dst": dst, "dport": dport, "rule": None, "inbound": m.group("dir") == "<-",
+                   "bytes": 0, "age": 0}
             continue
         if cur and cur["rule"] is None:
             r = RULE_RE.search(line)
             if r:
                 cur["rule"] = int(r.group(1))
+            b = BYTES_RE.search(line)
+            if b:
+                cur["bytes"] = int(b.group(1)) + int(b.group(2))
+            a = AGE_RE.search(line)
+            if a:
+                cur["age"] = int(a.group(1)) * 3600 + int(a.group(2)) * 60 + int(a.group(3))
     if cur:
         states.append(cur)
     return states

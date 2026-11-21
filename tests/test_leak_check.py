@@ -42,8 +42,9 @@ def lc():
 def test_parse_states(lc):
     st = lc.parse_states(STATES)
     assert len(st) == 7
-    assert st[0] == {"proto": "tcp", "client": "10.10.0.3", "cport": "55077", "dst": "110.242.72.117", "dport": "443", "rule": 75}
-    assert st[1] == {"proto": "tcp", "client": "10.10.0.3", "cport": "55077", "dst": "110.242.72.117", "dport": "443", "rule": 76}
+    base = {"proto": "tcp", "client": "10.10.0.3", "cport": "55077", "dst": "110.242.72.117", "dport": "443"}
+    assert st[0] == dict(base, rule=75, inbound=True, bytes=3799 + 8641, age=106)
+    assert st[1] == dict(base, rule=76, inbound=False, bytes=3799 + 8641, age=106)
     assert st[2]["dst"] == "23.46.216.204" and st[2]["rule"] == 80
 
 

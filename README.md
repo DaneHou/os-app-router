@@ -203,6 +203,25 @@ Notes:
 - `china_all` is an IP list, so it has no domains to forward.
 - **DNS servers in front of Unbound (AdGuard Home, Pi-hole):** they must forward these domains to Unbound, otherwise they resolve the domains themselves. The domain list is in `/usr/local/etc/app-router/dns_via_gateway.txt`. In AdGuard Home add one upstream line per domain, e.g. `[/iqiyi.com/]127.0.0.1:53530` (Unbound's port). Domain-specific upstreams for the same domain are combined, so remove that domain from any other upstream list.
 
+### Route Inspector
+
+The **Inspector** tab shows how traffic is routed, without reading pf output by hand.
+
+**Trace** (client IP + domain or URL) walks through these steps:
+
+1. Rules covering the client (source, interface, gateway, categories).
+2. Which category or custom domain list the domain matches, and whether one of the client's rules uses it.
+3. How the firewall resolves it: Unbound forward-zone (Resolve DNS via Gateway) and whether the route to that DNS server really uses the gateway.
+4. The addresses it resolves to now, and the addresses clients recently received for it.
+5. For each address, whether it is in the rule's table (and when it was learned), so whether it goes via the rule gateway or the default route.
+6. The client's live connections to those addresses, with the path pf actually used (App Router rule, other policy route, or default route).
+
+Real problems are marked red: an address missing from the table, a connection that bypassed the gateway, or a broken DNS route. A domain no rule routes is reported as information.
+
+**Live Connections** lists every current connection of a client, largest first, with its host name (taken from the DNS answers seen in the last 2 h) and its path.
+
+The same is available from the shell: `configctl approuter inspect_trace <ip> <domain>`, `configctl approuter inspect_connections <ip>`.
+
 ### Leak Check
 
 **Status → Run Leak Check** lists, per rule, the current connections of the rule's clients to the rule's domains and how many of them did **not** go through the rule's gateway. Host names come from the DNS answers the DNS watcher saw in the last 2 hours (any resolver on the firewall). A connection counts as routed when its pf state was created by an App Router route-to rule. Typical reasons for a leak:

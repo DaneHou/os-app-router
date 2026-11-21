@@ -561,6 +561,77 @@
             loadStatus();
         });
 
+        // Route inspector
+        (function() {
+            function esc(s) { return $('<span>').text(s == null ? '' : s).html(); }
+            function fmtBytes(b) {
+                var u = ['B', 'KB', 'MB', 'GB']; var i = 0;
+                while (b >= 1024 && i < u.length - 1) { b /= 1024; i++; }
+                return (i ? b.toFixed(1) : b) + ' ' + u[i];
+            }
+            var icons = {ok: 'fa-check-circle text-success', bad: 'fa-times-circle text-danger',
+                         warn: 'fa-exclamation-triangle text-warning', info: 'fa-info-circle text-info'};
+            function loadClients() {
+                ajaxGet(url="/api/approuter/service/inspect", sendData={action: 'clients'}, callback=function(data) {
+                    if (!data || !data.clients) { return; }
+                    var html = '';
+                    $.each(data.clients, function(i, c) {
+                        html += '<option value="' + esc(c.ip) + '">' + esc(c.rule) + '</option>';
+                    });
+                    $('#inspClients').html(html);
+                });
+            }
+            $('a[href="#inspector"]').on('shown.bs.tab', loadClients);
+            if (window.location.hash === '#inspector') { loadClients(); }
+
+            function busy(on) {
+                $('#inspTraceAct, #inspConnAct').prop('disabled', on);
+                if (on) { $('#inspResult').html('<p><i class="fa fa-spinner fa-pulse"></i> {{ lang._("Inspecting...") }}</p>'); }
+            }
+            function error(data) {
+                $('#inspResult').html('<div class="alert alert-danger">' + esc(data && data.message ? data.message : '{{ lang._("Inspection failed") }}') + '</div>');
+            }
+            $('#inspTraceAct').click(function() {
+                busy(true);
+                ajaxGet(url="/api/approuter/service/inspect",
+                        sendData={action: 'trace', client: $('#inspClient').val(), domain: $('#inspDomain').val()},
+                        callback=function(data) {
+                    busy(false);
+                    if (!data || data.status !== 'ok') { error(data); return; }
+                    var cls = data.problems > 0 ? 'alert-danger' : (data.verdict === 'routed' ? 'alert-success' : 'alert-info');
+                    var html = '<div class="alert ' + cls + '">' + esc(data.summary) + '</div><ol style="padding-left:1.5em">';
+                    $.each(data.steps, function(i, st) {
+                        html += '<li style="margin-bottom:0.6em"><i class="fa ' + (icons[st.status] || icons.info) + '"></i> <b>' + esc(st.title) + '</b>';
+                        if (st.detail) { html += '<div class="text-muted">' + esc(st.detail) + '</div>'; }
+                        if (st.items) {
+                            html += '<ul style="font-family:monospace;font-size:12px">';
+                            $.each(st.items, function(j, it) { html += '<li>' + esc(it) + '</li>'; });
+                            html += '</ul>';
+                        }
+                        html += '</li>';
+                    });
+                    $('#inspResult').html(html + '</ol>');
+                });
+            });
+            $('#inspConnAct').click(function() {
+                busy(true);
+                ajaxGet(url="/api/approuter/service/inspect", sendData={action: 'connections', client: $('#inspClient').val()},
+                        callback=function(data) {
+                    busy(false);
+                    if (!data || data.status !== 'ok') { error(data); return; }
+                    var html = '<p class="text-muted">' + esc(data.total) + ' {{ lang._("live connections, largest first") }}</p>' +
+                        '<table class="table table-condensed table-striped" style="font-size:12px"><thead><tr>' +
+                        '<th>{{ lang._("Host") }}</th><th>{{ lang._("Destination") }}</th><th>{{ lang._("Traffic") }}</th><th>{{ lang._("Path") }}</th></tr></thead><tbody>';
+                    $.each(data.connections, function(i, c) {
+                        var label = c.path.kind === 'approuter' ? 'label-success' : (c.path.kind === 'policy' ? 'label-info' : 'label-default');
+                        html += '<tr><td>' + esc(c.host || '?') + '</td><td>' + esc(c.dst + ':' + c.port + '/' + c.proto) + '</td><td>' +
+                            fmtBytes(c.bytes) + '</td><td><span class="label ' + label + '">' + esc(c.path.kind) + '</span> ' + esc(c.path.label) + '</td></tr>';
+                    });
+                    $('#inspResult').html(html + '</tbody></table>');
+                });
+            });
+        })();
+
         // Leak check: rule-domain connections that did not use the rule's gateway
         $("#leakCheckAct").click(function() {
             var btn = $(this);
@@ -607,6 +678,7 @@
     <li><a data-toggle="tab" href="#categories">{{ lang._('Custom Categories') }}</a></li>
     <li><a data-toggle="tab" href="#lists">{{ lang._('List Sources') }}</a></li>
     <li><a data-toggle="tab" href="#status">{{ lang._('Status') }}</a></li>
+    <li><a data-toggle="tab" href="#inspector">{{ lang._('Inspector') }}</a></li>
 </ul>
 
 <div class="tab-content content-box">
@@ -721,6 +793,23 @@
                 <button class="btn btn-default" id="forceUpdateAct" type="button">
                     <b>{{ lang._('Force Full Update') }}</b> <i id="forceUpdateAct_progress"></i>
                 </button>
+            </div>
+        </div>
+    </div>
+
+    <div id="inspector" class="tab-pane fade in">
+        <div class="content-box" style="padding-bottom: 1.5em;">
+            <div class="col-md-12">
+                <h3>{{ lang._('Route Inspector') }}</h3>
+                <p class="text-muted">{{ lang._('Explains step by step how a client reaches a domain: matching rules, category, DNS, addresses, tables and the path pf actually uses for its live connections.') }}</p>
+                <div class="form-inline" style="margin-bottom:1em">
+                    <input type="text" class="form-control" id="inspClient" list="inspClients" placeholder="{{ lang._('Client IP, e.g. 192.168.1.20') }}" style="width:16em">
+                    <datalist id="inspClients"></datalist>
+                    <input type="text" class="form-control" id="inspDomain" placeholder="{{ lang._('Domain or URL, e.g. m.iqiyi.com') }}" style="width:22em">
+                    <button class="btn btn-primary" id="inspTraceAct" type="button"><i class="fa fa-random"></i> {{ lang._('Trace') }}</button>
+                    <button class="btn btn-default" id="inspConnAct" type="button"><i class="fa fa-list"></i> {{ lang._('Live Connections') }}</button>
+                </div>
+                <div id="inspResult"></div>
             </div>
         </div>
     </div>

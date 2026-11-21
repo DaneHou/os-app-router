@@ -243,6 +243,40 @@ class ServiceController extends ApiMutableServiceControllerBase
         return $result;
     }
 
+    /**
+     * Route inspector: GET /api/approuter/service/inspect?action=trace&client=IP&domain=NAME
+     * action=connections&client=IP lists a client's live connections, action=clients the rule clients.
+     */
+    public function inspectAction()
+    {
+        $action = (string)$this->request->get('action');
+        $client = trim((string)$this->request->get('client'));
+        $domain = strtolower(trim((string)$this->request->get('domain')));
+        $domain = preg_replace('#^[a-z]+://#', '', $domain);
+        $domain = explode('/', $domain)[0];
+        $domain = explode(':', $domain)[0];
+        $backend = new Backend();
+        if ($action === 'clients') {
+            $out = $backend->configdRun('approuter inspect_clients');
+        } else {
+            if (!filter_var($client, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4)) {
+                return ['status' => 'error', 'message' => gettext('Enter the client\'s IPv4 address')];
+            }
+            if ($action === 'trace') {
+                if (!preg_match('/^(?=.{1,253}$)([a-z0-9_]([a-z0-9_-]{0,61}[a-z0-9])?\.)+[a-z][a-z0-9-]{0,62}$/', $domain)) {
+                    return ['status' => 'error', 'message' => gettext('Enter a domain name such as m.iqiyi.com')];
+                }
+                $out = $backend->configdpRun('approuter inspect_trace', [$client, $domain]);
+            } elseif ($action === 'connections') {
+                $out = $backend->configdpRun('approuter inspect_connections', [$client]);
+            } else {
+                return ['status' => 'error', 'message' => 'unknown action'];
+            }
+        }
+        $result = json_decode(trim($out), true);
+        return is_array($result) ? $result : ['status' => 'error', 'message' => gettext('Inspection failed')];
+    }
+
     public function detailStatusAction()
     {
         $backend = new Backend();
