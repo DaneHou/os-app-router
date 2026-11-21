@@ -202,6 +202,7 @@ Notes:
 - Choose a DNS server your other DNS settings don't use, because all traffic to that address goes through the gateway. If two rules use the same server with different gateways, the later rule is skipped. If a domain is in several rules, the first rule wins.
 - `china_all` is an IP list, so it has no domains to forward.
 - **DNS servers in front of Unbound (AdGuard Home, Pi-hole):** they must forward these domains to Unbound, otherwise they resolve the domains themselves. The domain list is in `/usr/local/etc/app-router/dns_via_gateway.txt`. In AdGuard Home add one upstream line per domain, e.g. `[/iqiyi.com/]127.0.0.1:53530` (Unbound's port). Domain-specific upstreams for the same domain are combined, so remove that domain from any other upstream list.
+- **Checked automatically:** after every update App Router asks port 53 for a marker record (`_approuter-check.<first domain>` TXT) that only Unbound knows. If the answer doesn't come back, the Status tab warns that queries don't reach Unbound and names the server on port 53.
 
 ### Route Inspector
 

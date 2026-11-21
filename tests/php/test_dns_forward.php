@@ -98,6 +98,8 @@ run_case('domain_cap', function ($check) use ($GW) {
 run_case('render', function ($check) {
     $check('empty', ar_render_unbound([]) === '');
     $c = ar_render_unbound(['iqiyi.com' => '223.6.6.6']);
+    $check('marker record', strpos($c, "server:\n    local-data: \"_approuter-check.iqiyi.com. 60 IN TXT approuter\"\n") !== false);
+    $check('marker uses first domain', ar_check_name(['qy.net' => 'x', 'iqiyi.com' => 'x']) === '_approuter-check.iqiyi.com');
     $check('zone', strpos($c, "forward-zone:\n    name: \"iqiyi.com.\"\n    forward-addr: 223.6.6.6\n    forward-tcp-upstream: yes\n") !== false);
 });
 

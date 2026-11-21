@@ -226,6 +226,14 @@ class ServiceController extends ApiMutableServiceControllerBase
                 $warnings[] = sprintf(gettext('Rule "%s": interface "%s" is disabled, the rule is not active.'), $name, $if);
             }
         }
+        // "Resolve DNS via gateway": result of dns_forward.php's check through port 53
+        $st = json_decode((string)@file_get_contents('/usr/local/etc/app-router/dns_forward_status.json'), true);
+        if (is_array($st) && !empty($st['zones']) && empty($st['reaches_unbound'])) {
+            $warnings[] = sprintf(
+                gettext('Resolve DNS via gateway: DNS queries on port 53 (answered by %s) do not reach Unbound, so it has no effect. Forward the domains in /usr/local/etc/app-router/dns_via_gateway.txt to Unbound (127.0.0.1:%d) in that DNS server.'),
+                $st['port53'] ?: gettext('another DNS server'), (int)($st['unbound_port'] ?? 53)
+            );
+        }
         return $warnings;
     }
 

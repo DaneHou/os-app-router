@@ -158,6 +158,7 @@ CIDRs:   203.0.113.10
 - 请选一个其他 DNS 设置没有用到的服务器，因为发往这个地址的所有流量都会走网关。如果两条规则用了同一个 DNS 服务器、却指向不同网关，后面那条会被跳过。同一个域名出现在多条规则里时，以第一条为准。
 - `china_all` 是 IP 列表，没有域名可以转发。
 - **Unbound 前面还有其他 DNS 服务（AdGuard Home、Pi-hole）时：**它们必须把这些域名转给 Unbound，否则会自己去解析。域名清单在 `/usr/local/etc/app-router/dns_via_gateway.txt`。在 AdGuard Home 里为每个域名加一行上游，例如 `[/iqiyi.com/]127.0.0.1:53530`（Unbound 的端口）。AdGuard 对同一个域名的多条上游会合并使用，所以要把这个域名从其他上游列表里去掉。
+- **自动检查：**每次更新后，App Router 会通过端口 53 查询一条只有 Unbound 才有的标记记录（`_approuter-check.<第一个域名>` TXT）。查不到时，Status 页面会提示查询没有到达 Unbound，并显示端口 53 上是哪个 DNS 服务。
 
 ### 路由检查器
 
