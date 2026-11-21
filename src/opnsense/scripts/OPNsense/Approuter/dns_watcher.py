@@ -650,6 +650,9 @@ def names_loop():
             dump_names()
         except Exception as e:
             log(f"Could not write {NAMES_FILE}: {e}", syslog.LOG_ERR)
+        # also catches sniffers of a previous watcher that exited after we started
+        if kill_orphan_sniffers():
+            log("Killed orphaned tcpdump sniffer(s)")
 
 
 def process_sniffed_dns(query_domain, answer_ips):
