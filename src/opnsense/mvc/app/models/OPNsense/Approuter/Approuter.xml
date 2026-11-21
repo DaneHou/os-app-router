@@ -56,7 +56,7 @@
                     <Required>Y</Required>
                     <FieldSeparator>,</FieldSeparator>
                     <Mask>/^[a-z0-9_:.\-\/ ,]+$/i</Mask>
-                    <ValidationMessage>Enter "any", IP/subnet addresses or firewall alias names</ValidationMessage>
+                    <ValidationMessage>Enter "any", IP/subnet addresses, firewall alias names or device MAC addresses</ValidationMessage>
                 </sourceNets>
                 <categories type="CSVListField">
                     <Required>N</Required>

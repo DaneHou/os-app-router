@@ -68,6 +68,7 @@ Web UI (Volt/jQuery) → REST API (PHP Controllers) → configd actions → Pyth
 /api/approuter/settings/{searchRule,getRule,addRule,setRule,delRule,toggleRule}  — Rule CRUD
 /api/approuter/settings/getCategories                — Category list from app_categories.json
 /api/approuter/settings/getGateways                  — Gateway list from Routing model
+/api/approuter/settings/{macMigrationPreview,macMigrationApply} — Convert rule IPs to devices (MAC)
 /api/approuter/service/{reconfigure,updateLists,forceUpdate}          — Service operations
 /api/approuter/service/{status,start,stop,restart}                   — Service control (used by updateServiceControlUI)
 /api/approuter/service/detailStatus                                  — Detailed status (pf tables, rule stats, logs)

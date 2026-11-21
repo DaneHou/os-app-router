@@ -27,6 +27,8 @@
  */
 
 use OPNsense\Approuter\Approuter;
+use OPNsense\Approuter\MacAliases;
+use OPNsense\Approuter\Sources;
 
 /**
  * Register AppRouter firewall rules and pf tables
@@ -62,7 +64,14 @@ function approuter_firewall(\OPNsense\Firewall\Plugin $fw)
         ];
     }
 
-    $valid = approuter_register_rules($fw, $rules, $tablePrefix, $clientsDir, approuter_alias_names());
+    $valid = approuter_register_rules(
+        $fw,
+        $rules,
+        $tablePrefix,
+        $clientsDir,
+        approuter_alias_names(),
+        MacAliases::ownedNames()
+    );
     approuter_cleanup_orphan_tables($tablePrefix, $valid);
 }
 
@@ -94,33 +103,31 @@ function approuter_alias_names()
  */
 function approuter_is_net($entry)
 {
-    $parts = explode('/', $entry, 2);
-    if (filter_var($parts[0], FILTER_VALIDATE_IP) === false) {
-        return false;
-    }
-    if (count($parts) === 1) {
-        return true;
-    }
-    $max = strpos($parts[0], ':') !== false ? 128 : 32;
-    return ctype_digit($parts[1]) && (int)$parts[1] <= $max;
+    return Sources::isNet($entry);
 }
 
 /**
- * Split a rule's source list into "any", plain IPs/CIDRs and alias names.
+ * Split a rule's source list into "any", plain IPs/CIDRs, alias names and
+ * device MACs ("mac:aa:bb:cc:dd:ee:ff" or a raw MAC, normalised).
  * @param string $sourceNets comma separated source list
  * @param array|null $aliasNames known address aliases (null = don't check existence)
- * @return array ['any' => bool, 'nets' => [], 'aliases' => [], 'invalid' => []]
+ * @return array ['any' => bool, 'nets' => [], 'aliases' => [], 'macs' => [], 'invalid' => []]
  */
 function approuter_parse_sources($sourceNets, $aliasNames = null)
 {
-    $result = ['any' => false, 'nets' => [], 'aliases' => [], 'invalid' => []];
+    $result = ['any' => false, 'nets' => [], 'aliases' => [], 'macs' => [], 'invalid' => []];
     foreach (explode(',', (string)$sourceNets) as $entry) {
         $entry = trim($entry);
         if ($entry === '') {
             continue;
         }
+        $mac = Sources::normalizeMac($entry);
         if (strtolower($entry) === 'any') {
             $result['any'] = true;
+        } elseif ($mac !== null) {
+            if (!in_array($mac, $result['macs'], true)) {
+                $result['macs'][] = $mac;
+            }
         } elseif (approuter_is_net($entry)) {
             if (!in_array($entry, $result['nets'], true)) {
                 $result['nets'][] = $entry;
@@ -144,9 +151,12 @@ function approuter_parse_sources($sourceNets, $aliasNames = null)
  * Plain IPs/CIDRs of a rule go into a file-backed <prefix>_clients_<hash>
  * table; alias sources are referenced directly as <alias> so pf follows the
  * alias contents (e.g. MAC aliases re-resolved via ARP) without a reload.
+ * Device (MAC) sources use the rule's App Router managed MAC alias
+ * (Sources::macAliasName(), kept in sync by MacAliases::sync()).
+ * @param array|null $ownedMacAliases managed alias names that exist (null = don't check)
  * @return array valid client files/tables, custom tables and _gwN tables
  */
-function approuter_register_rules($fw, array $rules, $tablePrefix, $clientsDir, $aliasNames = null)
+function approuter_register_rules($fw, array $rules, $tablePrefix, $clientsDir, $aliasNames = null, $ownedMacAliases = null)
 {
     $categoriesNeeded = [];
     foreach ($rules as $rule) {
@@ -215,6 +225,16 @@ function approuter_register_rules($fw, array $rules, $tablePrefix, $clientsDir, 
             syslog(LOG_WARNING, "approuter: rule '{$label}': source '{$bad}' is not an IP/subnet or address alias, ignored");
         }
 
+        $sourceAliases = $sources['aliases'];
+        if (!empty($sources['macs'])) {
+            $macAlias = Sources::macAliasName($rule['uuid']);
+            if ($ownedMacAliases === null || in_array($macAlias, $ownedMacAliases, true)) {
+                $sourceAliases[] = $macAlias;
+            } else {
+                syslog(LOG_WARNING, "approuter: rule '{$label}': device alias {$macAlias} missing, devices ignored (save the rule or Apply)");
+            }
+        }
+
         $fromClause = 'any';
         if (!$sources['any']) {
             $clientTableName = $tablePrefix . '_clients_' . substr(md5($rule['uuid']), 0, 8);
@@ -231,14 +251,14 @@ function approuter_register_rules($fw, array $rules, $tablePrefix, $clientsDir, 
                 $validClientTables[] = $clientTableName;
                 $froms[] = '<' . $clientTableName . '>';
             }
-            if (!empty($sources['aliases'])) {
+            if (!empty($sourceAliases)) {
                 // alias names for dns_watcher (state kills); pf reads the alias tables itself
                 $aliasFile = $clientsDir . '/' . $clientTableName . '.aliases';
-                if (file_put_contents($aliasFile, implode("\n", $sources['aliases']) . "\n") === false) {
+                if (file_put_contents($aliasFile, implode("\n", $sourceAliases) . "\n") === false) {
                     syslog(LOG_ERR, "approuter: failed to write alias file $aliasFile");
                 }
                 $validClientFiles[] = $clientTableName . '.aliases';
-                foreach ($sources['aliases'] as $alias) {
+                foreach ($sourceAliases as $alias) {
                     $froms[] = '<' . $alias . '>';
                 }
             }

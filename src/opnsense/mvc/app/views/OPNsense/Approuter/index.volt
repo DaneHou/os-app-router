@@ -344,6 +344,60 @@
             'toggle':'/api/approuter/settings/toggleRule/'
         });
 
+        // ── Convert IP sources to devices (preview, then apply on confirm) ──
+        function escHtml(s) { return $('<span>').text(s == null ? '' : String(s)).html(); }
+        $("#macMigrateAct").click(function() {
+            var $body = $("#macMigrateBody").html('<i class="fa fa-spinner fa-pulse"></i>');
+            $("#macMigrateConfirm").prop("disabled", true);
+            $("#DialogMacMigrate").modal("show");
+            ajaxGet("/api/approuter/settings/macMigrationPreview", {}, function(data) {
+                var rules = (data && data.rules) ? data.rules : [];
+                if (rules.length === 0) {
+                    $body.html('<p>{{ lang._("No rule source IP maps to exactly one device in the DHCP leases or ARP table. Nothing to convert.") }}</p>');
+                    return;
+                }
+                var html = '<p>{{ lang._("Checked IPs are replaced by the device (MAC). IPs that do not map to exactly one device (e.g. WireGuard peers) are kept.") }}</p>';
+                html += '<table class="table table-condensed"><thead><tr><th></th><th>{{ lang._("Rule") }}</th><th>{{ lang._("IP") }}</th><th>{{ lang._("Device") }}</th></tr></thead><tbody>';
+                $.each(rules, function(i, r) {
+                    $.each(r.replace, function(j, x) {
+                        html += '<tr><td><input type="checkbox" class="mac-migrate-item" checked="checked"'
+                             + ' data-uuid="' + escHtml(r.uuid) + '" data-entry="' + escHtml(x.entry) + '"/></td>'
+                             + '<td>' + escHtml(r.description || r.uuid) + '</td><td>' + escHtml(x.entry) + '</td><td>' + escHtml(x.label)
+                             + (x.random ? ' <span class="text-warning"><i class="fa fa-exclamation-triangle"></i> {{ lang._("random MAC: set Private Wi-Fi Address to Fixed/Off first") }}</span>' : '')
+                             + '</td></tr>';
+                    });
+                    if (r.keep.length) {
+                        html += '<tr><td></td><td>' + escHtml(r.description || r.uuid) + '</td><td colspan="2" class="text-muted">{{ lang._("kept") }}: ' + escHtml(r.keep.join(', ')) + '</td></tr>';
+                    }
+                });
+                html += '</tbody></table>';
+                $body.html(html);
+                $("#macMigrateConfirm").prop("disabled", false);
+            });
+        });
+        $("#macMigrateConfirm").click(function() {
+            var selection = {};
+            $(".mac-migrate-item:checked").each(function() {
+                var uuid = $(this).data("uuid");
+                (selection[uuid] = selection[uuid] || []).push(String($(this).data("entry")));
+            });
+            if ($.isEmptyObject(selection)) {
+                $("#DialogMacMigrate").modal("hide");
+                return;
+            }
+            $("#macMigrateConfirm_progress").addClass("fa fa-spinner fa-pulse");
+            ajaxCall("/api/approuter/settings/macMigrationApply", {selection: selection}, function(data) {
+                $("#macMigrateConfirm_progress").removeClass("fa fa-spinner fa-pulse");
+                $("#DialogMacMigrate").modal("hide");
+                $("#grid-rules").bootgrid("reload");
+                if (data && data.mac_alias_errors) {
+                    BootstrapDialog.show({type: BootstrapDialog.TYPE_WARNING, title: "App Router",
+                        message: escHtml(data.mac_alias_errors.join("\n"))});
+                }
+                $("#RuleChangeMessage").show();
+            });
+        });
+
         $("#reconfigureAct").click(function(){
             $("#reconfigureAct_progress").addClass("fa fa-spinner fa-pulse");
             ajaxCall(url="/api/approuter/service/reconfigure", sendData={}, callback=function(data,status) {
@@ -563,6 +617,10 @@
             <button class="btn btn-primary" id="reconfigureAct" type="button">
                 <b>{{ lang._('Apply') }}</b> <i id="reconfigureAct_progress"></i>
             </button>
+            <button class="btn btn-default" id="macMigrateAct" type="button"
+                    title="{{ lang._('Replace rule source IPs by the device (MAC) currently using them. Shows a preview first.') }}">
+                {{ lang._('Convert IP sources to devices') }}
+            </button>
         </div>
         </div>
     </div>
@@ -713,6 +771,24 @@
                 <button type="button" class="btn btn-default" data-dismiss="modal">{{ lang._('Cancel') }}</button>
                 <button type="button" class="btn btn-primary" id="saveCustomCategoryAct">
                     <b>{{ lang._('Save') }}</b> <i id="saveCustomCategoryAct_progress"></i>
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="modal fade" id="DialogMacMigrate" tabindex="-1" role="dialog">
+    <div class="modal-dialog modal-lg" role="document">
+        <div class="modal-content">
+            <div class="modal-header">
+                <button type="button" class="close" data-dismiss="modal"><span>&times;</span></button>
+                <h4 class="modal-title">{{ lang._('Convert IP sources to devices') }}</h4>
+            </div>
+            <div class="modal-body" id="macMigrateBody"></div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-default" data-dismiss="modal">{{ lang._('Cancel') }}</button>
+                <button type="button" class="btn btn-primary" id="macMigrateConfirm" disabled="disabled">
+                    <b>{{ lang._('Convert selected') }}</b> <i id="macMigrateConfirm_progress"></i>
                 </button>
             </div>
         </div>

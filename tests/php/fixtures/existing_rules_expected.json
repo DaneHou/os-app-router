@@ -1,0 +1,161 @@
+{
+    "rules": [
+        {
+            "prio": 1,
+            "type": "pass",
+            "quick": true,
+            "ipprotocol": "inet",
+            "statetype": "keep",
+            "from": "<approuter_clients_a6a42fca>",
+            "to": "<approuter_custom_a6a42fca>",
+            "gateway": "FRP_GW",
+            "direction": "in",
+            "interface": "opt1",
+            "descr": "AppRouter: my-mbp via FRP_GW",
+            "#ref": "approuter:700da3ee-4336-4ebd-9c12-23750865952d:custom"
+        },
+        {
+            "prio": 2,
+            "type": "pass",
+            "quick": true,
+            "ipprotocol": "inet",
+            "statetype": "keep",
+            "from": "<approuter_clients_a6a42fca>",
+            "to": "<approuter_video_iqiyi>",
+            "gateway": "FRP_GW",
+            "direction": "in",
+            "interface": "opt1",
+            "descr": "AppRouter: my-mbp via FRP_GW",
+            "#ref": "approuter:700da3ee-4336-4ebd-9c12-23750865952d"
+        },
+        {
+            "prio": 3,
+            "type": "pass",
+            "quick": true,
+            "ipprotocol": "inet",
+            "statetype": "keep",
+            "from": "<approuter_clients_f34b8400>",
+            "to": "<approuter_video_iqiyi>",
+            "gateway": "FRP_GW",
+            "direction": "in",
+            "interface": "opt1",
+            "descr": "AppRouter: my-studio via FRP_GW",
+            "#ref": "approuter:c3e29e49-087e-4fb2-83b4-c1b07f61223c"
+        },
+        {
+            "prio": 4,
+            "type": "pass",
+            "quick": true,
+            "ipprotocol": "inet",
+            "statetype": "keep",
+            "from": "<approuter_clients_a5c086d7>",
+            "to": "<approuter_video_iqiyi>",
+            "gateway": "FRP_GW",
+            "direction": "in",
+            "interface": "opt1",
+            "descr": "AppRouter: my-iMac via FRP_GW",
+            "#ref": "approuter:e7ba9c24-8577-4188-9b13-bacbb9bc5733"
+        },
+        {
+            "prio": 5,
+            "type": "pass",
+            "quick": true,
+            "ipprotocol": "inet",
+            "statetype": "keep",
+            "from": "<approuter_clients_c6ad9165>",
+            "to": "<approuter_custom_c6ad9165>",
+            "gateway": "FRP_GW",
+            "direction": "in",
+            "interface": "opt6",
+            "descr": "AppRouter: wg-flyer via FRP_GW",
+            "#ref": "approuter:3ee28171-7e72-4c1d-b2f3-29b6161323e6:custom"
+        },
+        {
+            "prio": 6,
+            "type": "pass",
+            "quick": true,
+            "ipprotocol": "inet",
+            "statetype": "keep",
+            "from": "<approuter_clients_c6ad9165>",
+            "to": "<approuter_video_iqiyi>",
+            "gateway": "FRP_GW",
+            "direction": "in",
+            "interface": "opt6",
+            "descr": "AppRouter: wg-flyer via FRP_GW",
+            "#ref": "approuter:3ee28171-7e72-4c1d-b2f3-29b6161323e6"
+        },
+        {
+            "prio": 7,
+            "type": "pass",
+            "quick": true,
+            "ipprotocol": "inet",
+            "statetype": "keep",
+            "from": "<approuter_clients_8226128a>",
+            "to": "<approuter_custom_8226128a>",
+            "gateway": "FRP_GW",
+            "direction": "in",
+            "interface": "opt6",
+            "descr": "AppRouter: wg-mbp via FRP_GW",
+            "#ref": "approuter:48bedf51-01d9-4c4e-868b-c4c01c50103a:custom"
+        },
+        {
+            "prio": 8,
+            "type": "pass",
+            "quick": true,
+            "ipprotocol": "inet",
+            "statetype": "keep",
+            "from": "<approuter_clients_8226128a>",
+            "to": "<approuter_video_iqiyi>",
+            "gateway": "FRP_GW",
+            "direction": "in",
+            "interface": "opt6",
+            "descr": "AppRouter: wg-mbp via FRP_GW",
+            "#ref": "approuter:48bedf51-01d9-4c4e-868b-c4c01c50103a"
+        }
+    ],
+    "tables": {
+        "approuter_video_iqiyi": {
+            "persist": true,
+            "file": null
+        },
+        "approuter_clients_a6a42fca": {
+            "persist": true,
+            "file": "@DIR@/approuter_clients_a6a42fca.txt"
+        },
+        "approuter_custom_a6a42fca": {
+            "persist": true,
+            "file": null
+        },
+        "approuter_clients_f34b8400": {
+            "persist": true,
+            "file": "@DIR@/approuter_clients_f34b8400.txt"
+        },
+        "approuter_clients_a5c086d7": {
+            "persist": true,
+            "file": "@DIR@/approuter_clients_a5c086d7.txt"
+        },
+        "approuter_clients_c6ad9165": {
+            "persist": true,
+            "file": "@DIR@/approuter_clients_c6ad9165.txt"
+        },
+        "approuter_custom_c6ad9165": {
+            "persist": true,
+            "file": null
+        },
+        "approuter_clients_8226128a": {
+            "persist": true,
+            "file": "@DIR@/approuter_clients_8226128a.txt"
+        },
+        "approuter_custom_8226128a": {
+            "persist": true,
+            "file": null
+        }
+    },
+    "files": {
+        "approuter_clients_8226128a.txt": "10.10.0.2/32\n",
+        "approuter_clients_a5c086d7.txt": "192.168.70.171/32\n",
+        "approuter_clients_a6a42fca.txt": "192.168.70.124/32\n",
+        "approuter_clients_c6ad9165.txt": "10.10.0.4/32\n",
+        "approuter_clients_f34b8400.txt": "192.168.70.90/32\n"
+    }
+}

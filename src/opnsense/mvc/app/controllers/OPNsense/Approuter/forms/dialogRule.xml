@@ -21,7 +21,15 @@
         <type>select_multiple</type>
         <style>tokenize</style>
         <allownew>true</allownew>
-        <help>"any", IPs/subnets (type and press Enter, e.g. 192.168.1.0/24, 10.0.0.5) and/or firewall aliases (pick from the list; Host, Network and MAC address aliases all work). Aliases are referenced as pf tables, so changes to an alias apply without touching the rule. MAC aliases only match once the device's IP is in the ARP table and only for the MAC the device actually uses (turn off Private Wi-Fi Address on Apple devices or add that MAC). IPv4 only. WireGuard peers have no MAC: use their tunnel IP.</help>
+        <help><![CDATA["any", devices, IPs/subnets and/or firewall aliases, mixed.<br/>
+<b>Devices</b> (picked from the DHCP leases and ARP table, or type a MAC such as aa:bb:cc:dd:ee:ff) are matched by MAC address: App Router keeps a firewall alias of type "MAC address" per rule (ar_&lt;id&gt;_mac, do not edit) that core resolves to the device's current IP, so the rule follows the device when its IP changes.
+<ul>
+<li>Apple devices: set "Private Wi-Fi Address" to Fixed or Off for this network, otherwise the MAC changes (devices marked "private (random) MAC").</li>
+<li>Matching starts only once the device's IP is in the ARP table, about 5 minutes after it joins.</li>
+<li>IPv4 only.</li>
+<li>WireGuard peers have no MAC: use their tunnel IP (e.g. 10.10.0.2).</li>
+</ul>
+IPs/subnets: type and press Enter (192.168.1.0/24, 10.0.0.5). Aliases are referenced as pf tables, changes to an alias apply without touching the rule.]]></help>
     </field>
     <field>
         <id>rule.categories</id>

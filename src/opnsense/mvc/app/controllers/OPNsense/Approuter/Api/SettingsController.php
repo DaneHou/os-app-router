@@ -28,6 +28,8 @@
 
 namespace OPNsense\Approuter\Api;
 
+use OPNsense\Approuter\MacAliases;
+use OPNsense\Approuter\Sources;
 use OPNsense\Base\ApiMutableModelControllerBase;
 use OPNsense\Core\Backend;
 
@@ -147,32 +149,52 @@ class SettingsController extends ApiMutableModelControllerBase
     }
 
     /**
-     * Options for the source tokenizer: "any", every address alias (all types
-     * but port, incl. MAC aliases) and the rule's current entries (IPs/CIDRs
-     * are free text, allownew). Keys are what gets stored.
+     * Options for the source tokenizer, keys are what gets stored:
+     * "any" and the rule's current entries (IPs/CIDRs are free text,
+     * allownew), "Devices" (mac:<MAC> tokens from the DHCP leases + ARP
+     * table) and "Aliases" (every address alias, all types but port, except
+     * the MAC aliases App Router manages itself).
      */
     private function sourceOptions($value)
     {
-        $selected = array_values(array_filter(array_map('trim', explode(',', $value)), 'strlen'));
+        $selected = Sources::split($value);
         $options = [];
         foreach ($selected as $entry) {
-            $options[$entry] = ['value' => $entry, 'selected' => 1];
+            $label = $entry;
+            $mac = Sources::normalizeMac($entry);
+            if ($mac !== null) {
+                $label = $mac . ' (device not seen now)';
+            }
+            $options[$entry] = ['value' => $label, 'selected' => 1];
         }
         if (!isset($options['any'])) {
             $options['any'] = ['value' => 'any', 'selected' => 0];
         }
         try {
+            foreach (Sources::deviceOptions(MacAliases::devices()) as $token => $label) {
+                if (isset($options[$token])) {
+                    $options[$token]['value'] = $label;
+                    $options[$token]['optgroup'] = 'Devices';
+                } else {
+                    $options[$token] = ['value' => $label, 'selected' => 0, 'optgroup' => 'Devices'];
+                }
+            }
+        } catch (\Throwable $e) {
+            // leases/ARP unavailable: MACs can still be typed
+        }
+        try {
             foreach ((new \OPNsense\Firewall\Alias())->aliases->alias->iterateItems() as $alias) {
                 $name = (string)$alias->name;
                 $type = (string)$alias->type;
-                if ($name === '' || $type === 'port') {
+                if ($name === '' || $type === 'port' || Sources::aliasOwner($name, (string)$alias->description) !== null) {
                     continue;
                 }
                 $label = $name . ' (' . $type . ')';
                 if (isset($options[$name])) {
                     $options[$name]['value'] = $label;
+                    $options[$name]['optgroup'] = 'Aliases';
                 } else {
-                    $options[$name] = ['value' => $label, 'selected' => 0];
+                    $options[$name] = ['value' => $label, 'selected' => 0, 'optgroup' => 'Aliases'];
                 }
             }
         } catch (\Throwable $e) {
@@ -202,19 +224,99 @@ class SettingsController extends ApiMutableModelControllerBase
         return '';
     }
 
+    /**
+     * Store typed MACs (aa:bb:.., aa-bb-..) as mac:aa:bb:cc:dd:ee:ff
+     * (called after validation, before the config is written).
+     */
+    protected function setBaseHook($node)
+    {
+        if (isset($node->sourceNets)) {
+            $node->sourceNets->setValue(Sources::normalizeList((string)$node->sourceNets));
+        }
+    }
+
+    /** update the managed MAC aliases after a rule change, report problems */
+    private function withMacAliases(array $result)
+    {
+        if (in_array($result['result'] ?? '', ['saved', 'deleted'], true)) {
+            $sync = MacAliases::sync();
+            if (!empty($sync['errors'])) {
+                $result['mac_alias_errors'] = $sync['errors'];
+            }
+        }
+        return $result;
+    }
+
     public function addRuleAction()
     {
-        return $this->addBase('rule', 'rules.rule');
+        return $this->withMacAliases($this->addBase('rule', 'rules.rule'));
     }
 
     public function setRuleAction($uuid)
     {
-        return $this->setBase('rule', 'rules.rule', $uuid);
+        return $this->withMacAliases($this->setBase('rule', 'rules.rule', $uuid));
     }
 
     public function delRuleAction($uuid)
     {
-        return $this->delBase('rules.rule', $uuid);
+        return $this->withMacAliases($this->delBase('rules.rule', $uuid));
+    }
+
+    /** rules as [uuid => [description, sourceNets]] */
+    private function ruleSources()
+    {
+        $rules = [];
+        foreach ($this->getModel()->rules->rule->iterateItems() as $uuid => $rule) {
+            $rules[$uuid] = ['description' => (string)$rule->description, 'sourceNets' => (string)$rule->sourceNets];
+        }
+        return $rules;
+    }
+
+    /**
+     * "Convert IP sources to devices", step 1: which rule IPs map to exactly
+     * one MAC in the DHCP leases / ARP table. Changes nothing.
+     */
+    public function macMigrationPreviewAction()
+    {
+        return ['rules' => Sources::migrationPreview($this->ruleSources(), MacAliases::devices())];
+    }
+
+    /**
+     * Step 2 (POST {selection: {ruleUuid: [ip entry, ..]}}): replace the
+     * confirmed entries by their device. The mapping is checked again;
+     * entries that no longer map one-to-one are left alone.
+     */
+    public function macMigrationApplyAction()
+    {
+        $result = ['result' => 'failed', 'changed' => []];
+        if (!$this->request->isPost()) {
+            return $result;
+        }
+        $selection = $this->request->getPost('selection');
+        if (!is_array($selection)) {
+            return $result;
+        }
+        $devices = MacAliases::devices();
+        \OPNsense\Core\Config::getInstance()->lock();
+        $mdl = $this->getModel();
+        foreach ($selection as $uuid => $entries) {
+            $node = $mdl->getNodeByReference('rules.rule.' . $uuid);
+            if ($node === null || !is_array($entries)) {
+                continue;
+            }
+            $old = (string)$node->sourceNets;
+            $new = Sources::applyMigration($old, array_map('strval', $entries), $devices);
+            if ($new !== $old) {
+                $node->sourceNets->setValue($new);
+                $result['changed'][$uuid] = $new;
+            }
+        }
+        if (!empty($result['changed'])) {
+            $this->save();
+        } else {
+            \OPNsense\Core\Config::getInstance()->unlock();
+        }
+        return $this->withMacAliases(['result' => 'saved'] + $result);
     }
 
     public function toggleRuleAction($uuid, $enabled = null)

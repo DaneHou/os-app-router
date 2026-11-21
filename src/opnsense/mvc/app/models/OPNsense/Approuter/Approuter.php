@@ -30,7 +30,25 @@
 namespace OPNsense\Approuter;
 
 use OPNsense\Base\BaseModel;
+use OPNsense\Base\Messages\Message;
 
 class Approuter extends BaseModel
 {
+    /**
+     * Rule sources: every entry must be "any", an IP/subnet, an alias name
+     * or a full MAC address (mac:aa:bb:cc:dd:ee:ff or a raw MAC).
+     */
+    public function performValidation($validateFullModel = false)
+    {
+        $messages = parent::performValidation($validateFullModel);
+        foreach ($this->rules->rule->iterateItems() as $rule) {
+            if (!$validateFullModel && !$rule->sourceNets->isFieldChanged()) {
+                continue;
+            }
+            foreach (Sources::validate((string)$rule->sourceNets) as $error) {
+                $messages->appendMessage(new Message($error, $rule->sourceNets->__reference));
+            }
+        }
+        return $messages;
+    }
 }

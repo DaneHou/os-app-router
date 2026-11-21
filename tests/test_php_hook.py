@@ -25,6 +25,16 @@ CASES = [
     "category_tables_stay_fileless",
     "smart_gateway_rules_use_alias_sources",
     "orphan_client_files_removed",
+    "mac_token_parsing",
+    "mac_validation",
+    "parse_sources_macs",
+    "managed_alias_plan",
+    "rule_mac_only",
+    "rule_mixed_mac_ip_alias",
+    "rule_mac_alias_missing",
+    "existing_rules_identical_output",
+    "device_options",
+    "migration_preview",
 ]
 
 

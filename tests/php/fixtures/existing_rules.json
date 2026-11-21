@@ -1,0 +1,12 @@
+[
+  {"uuid": "700da3ee-4336-4ebd-9c12-23750865952d", "description": "my-mbp", "sourceNets": "192.168.70.124/32",
+   "categories": ["video.iqiyi"], "customDomains": "test.ustc.edu.cn", "gateway": "FRP_GW", "interface": "opt1", "smartGateway": "1"},
+  {"uuid": "c3e29e49-087e-4fb2-83b4-c1b07f61223c", "description": "my-studio", "sourceNets": "192.168.70.90/32",
+   "categories": ["video.iqiyi"], "customDomains": "", "gateway": "FRP_GW", "interface": "opt1", "smartGateway": "0"},
+  {"uuid": "e7ba9c24-8577-4188-9b13-bacbb9bc5733", "description": "my-iMac", "sourceNets": "192.168.70.171/32",
+   "categories": ["video.iqiyi"], "customDomains": "", "gateway": "FRP_GW", "interface": "opt1", "smartGateway": "0"},
+  {"uuid": "3ee28171-7e72-4c1d-b2f3-29b6161323e6", "description": "wg-flyer", "sourceNets": "10.10.0.4/32",
+   "categories": ["video.iqiyi"], "customDomains": "test.ustc.edu.cn", "gateway": "FRP_GW", "interface": "opt6", "smartGateway": "0"},
+  {"uuid": "48bedf51-01d9-4c4e-868b-c4c01c50103a", "description": "wg-mbp", "sourceNets": "10.10.0.2/32",
+   "categories": ["video.iqiyi"], "customDomains": "test.ustc.edu.cn", "gateway": "FRP_GW", "interface": "opt6", "smartGateway": "0"}
+]

@@ -98,7 +98,22 @@ any                              — all LAN clients
 192.168.1.0/24,10.0.0.5         — mixed
 Kids_Phones                     — firewall alias (e.g. a MAC address alias)
 Kids_Phones,10.10.0.4           — alias + WireGuard peer IP
+mac:a8:bb:cc:00:11:22           — device (picked from the Devices list or typed)
+mac:a8:bb:cc:00:11:22,10.10.0.4 — device + WireGuard peer IP
 ```
+
+**Devices as source.** The Source field lists the devices from the DHCP
+leases (`/var/db/dnsmasq.leases`) and the ARP table as
+`hostname · MAC · IP`; randomised (locally administered) MACs are marked.
+A device is stored as `mac:aa:bb:cc:dd:ee:ff` (a typed `aa:bb:..` or
+`aa-bb-..` is converted on save). For each rule with devices App Router keeps
+one firewall alias of type *MAC address*, `ar_<first 8 hex of the rule
+uuid>_mac`, described "Managed by App Router (rule <uuid>)": it is created,
+updated and deleted on rule save/delete and on Apply, and aliases without
+that name + description are never touched. The rule references the alias
+(`from <ar_xxxxxxxx_mac>`), so the MAC caveats below apply. *Convert IP
+sources to devices* (Rules tab) previews which rule IPs map to exactly one
+device and replaces only the ones you confirm (WireGuard IPs etc. are kept).
 
 **Aliases as source.** The Source field offers every address alias from
 *Firewall ‣ Aliases* (all types except Port). The generated rules reference

@@ -29,6 +29,7 @@
 namespace OPNsense\Approuter\Api;
 
 use OPNsense\Approuter\Approuter;
+use OPNsense\Approuter\MacAliases;
 use OPNsense\Base\ApiMutableServiceControllerBase;
 use OPNsense\Core\Backend;
 
@@ -44,6 +45,11 @@ class ServiceController extends ApiMutableServiceControllerBase
         $status = "failed";
         if ($this->request->isPost()) {
             session_write_close();
+            // Device (MAC) sources: create/update/delete the App Router
+            // managed MAC aliases before the filter reload below, which
+            // regenerates the alias definitions (template OPNsense/Filter)
+            // and runs `filter refresh_aliases` to resolve them via ARP.
+            MacAliases::sync();
             $backend = new Backend();
             $backend->configdRun('template reload OPNsense/Approuter');
             $backend->configdRun('approuter generate_dns');

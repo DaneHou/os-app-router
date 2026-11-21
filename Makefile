@@ -38,6 +38,10 @@ install-plugin:
 		$(PLUGIN_MVC)/models/OPNsense/Approuter/Approuter.xml
 	@cp src/opnsense/mvc/app/models/OPNsense/Approuter/Approuter.php \
 		$(PLUGIN_MVC)/models/OPNsense/Approuter/Approuter.php
+	@cp src/opnsense/mvc/app/models/OPNsense/Approuter/Sources.php \
+		$(PLUGIN_MVC)/models/OPNsense/Approuter/Sources.php
+	@cp src/opnsense/mvc/app/models/OPNsense/Approuter/MacAliases.php \
+		$(PLUGIN_MVC)/models/OPNsense/Approuter/MacAliases.php
 	@cp src/opnsense/mvc/app/models/OPNsense/Approuter/Menu/Menu.xml \
 		$(PLUGIN_MVC)/models/OPNsense/Approuter/Menu/Menu.xml
 	@cp src/opnsense/mvc/app/models/OPNsense/Approuter/ACL/ACL.xml \
