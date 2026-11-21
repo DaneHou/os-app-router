@@ -60,6 +60,9 @@ UNBOUND_ADDR = "127.0.0.1"
 UNBOUND_PORT = 53530
 
 domain_table_map = {}
+# Running tcpdump sniffers, killed on stop (they would outlive the watcher)
+sniffer_procs = set()
+sniffer_procs_lock = threading.Lock()
 # ip -> (query name, last seen) from every sniffed A answer
 recent_names = {}
 recent_names_lock = threading.Lock()
@@ -714,6 +717,8 @@ def sniff_interface(iface):
                 text=True,
                 bufsize=1
             )
+            with sniffer_procs_lock:
+                sniffer_procs.add(proc)
 
             while True:
                 line = proc.stdout.readline()
@@ -735,6 +740,8 @@ def sniff_interface(iface):
             log(f"[sniff] Error on {iface}: {e}", syslog.LOG_ERR)
 
         if proc:
+            with sniffer_procs_lock:
+                sniffer_procs.discard(proc)
             try:
                 proc.kill()
                 # tcpdump only prints a banner or an error, safe to read at exit
@@ -895,7 +902,37 @@ def reload_mappings(signum=None, frame=None):
     start_background_resolve("SIGHUP")
 
 
+def kill_sniffers():
+    with sniffer_procs_lock:
+        procs = list(sniffer_procs)
+    for proc in procs:
+        try:
+            proc.kill()
+        except OSError:
+            pass
+
+
+def kill_orphan_sniffers():
+    """tcpdump sniffers left behind by a watcher that died (parent is init)."""
+    try:
+        out = subprocess.run(["/bin/ps", "-axo", "pid=,ppid=,command="], capture_output=True, text=True).stdout
+    except OSError:
+        return 0
+    killed = 0
+    for line in out.splitlines():
+        parts = line.split(None, 2)
+        if (len(parts) == 3 and parts[1] == "1" and parts[2].startswith("/usr/sbin/tcpdump ")
+                and "-Q out" in parts[2] and "src port 53" in parts[2]):
+            try:
+                os.kill(int(parts[0]), signal.SIGTERM)
+                killed += 1
+            except (OSError, ValueError):
+                pass
+    return killed
+
+
 def cleanup(signum=None, frame=None):
+    kill_sniffers()
     save_seen()
     log("DNS watcher stopped")
     sys.exit(0)
@@ -918,6 +955,10 @@ def main():
         log(f"DNS watcher started (PID {os.getpid()})")
         restored = restore_seen()
         log(f"Restored {restored} learned entries from {SEEN_FILE}")
+
+        orphans = kill_orphan_sniffers()
+        if orphans:
+            log(f"Killed {orphans} orphaned tcpdump sniffer(s)")
 
         # Detect LAN interfaces for DNS sniffing
         interfaces = detect_lan_interfaces()

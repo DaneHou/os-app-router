@@ -240,3 +240,15 @@ def test_resolve_and_update_resolves_each_name_once(dns_watcher, monkeypatch):
     assert sorted(calls) == ["iqiyi.com", "www.iqiyi.com", "www.qy.net"]
     assert added["approuter_video_iqiyi"] == {"1.1.1.1", "2.2.2.2"}     # private dropped
     assert added["approuter_video"] == {"1.1.1.1", "2.2.2.2"}
+
+
+def test_kill_orphan_sniffers_only_kills_reparented_tcpdump(dns_watcher, monkeypatch):
+    import types
+    ps = ("  5572     1 /usr/sbin/tcpdump -U -l -n -Q out -i igc3 udp and src port 53 -vv\n"
+          " 23788 19758 /usr/sbin/tcpdump -U -l -n -Q out -i wg0 udp and src port 53 -vv\n"
+          "  6000     1 /usr/sbin/tcpdump -n -i igc0 port 80\n")
+    monkeypatch.setattr(dns_watcher.subprocess, "run", lambda *a, **k: types.SimpleNamespace(stdout=ps))
+    killed = []
+    monkeypatch.setattr(dns_watcher.os, "kill", lambda pid, sig: killed.append(pid))
+    assert dns_watcher.kill_orphan_sniffers() == 1
+    assert killed == [5572]
