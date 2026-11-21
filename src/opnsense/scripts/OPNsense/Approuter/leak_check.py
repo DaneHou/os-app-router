@@ -29,6 +29,8 @@ STATE_RE = re.compile(
     r"^\S+\s+(?P<proto>tcp|udp)\s+(?P<a>\S+)(?:\s+\((?P<ainner>[^)]+)\))?\s+(?P<dir>->|<-)\s+"
     r"(?P<b>\S+)(?:\s+\((?P<binner>[^)]+)\))?")
 RULE_RE = re.compile(r"\brule (\d+)\b")
+RLABEL_RE = re.compile(r"\brlabel (\S+?),?(?:\s|$)")
+LABEL_RE = re.compile(r'\blabel "([^"]+)"')
 BYTES_RE = re.compile(r"\b(\d+):(\d+) bytes\b")
 AGE_RE = re.compile(r"\bage (\d+):(\d+):(\d+)")
 RULE_LINE_RE = re.compile(r"^@(\d+)\s+(.*)$")
@@ -57,12 +59,15 @@ def parse_states(text):
             dst, dport = split_hostport(dst)
             cur = {"proto": m.group("proto"), "client": client, "cport": cport,
                    "dst": dst, "dport": dport, "rule": None, "inbound": m.group("dir") == "<-",
-                   "bytes": 0, "age": 0}
+                   "bytes": 0, "age": 0, "rlabel": None}
             continue
         if cur and cur["rule"] is None:
             r = RULE_RE.search(line)
             if r:
                 cur["rule"] = int(r.group(1))
+                rl = RLABEL_RE.search(line)
+                if rl:
+                    cur["rlabel"] = rl.group(1)
             b = BYTES_RE.search(line)
             if b:
                 cur["bytes"] = int(b.group(1)) + int(b.group(2))
@@ -90,7 +95,21 @@ def parse_routed_rules(text, prefix):
         tables = set(re.findall(r"to <(" + re.escape(prefix) + r"_[A-Za-z0-9_]+)(?::\d+)?>", m.group(2)))
         if tables:
             routed[int(m.group(1))] = tables
+            lab = LABEL_RE.search(m.group(2))
+            if lab:
+                routed["label:" + lab.group(1)] = tables
     return routed
+
+
+def state_routed(st, routed):
+    """Was this state created by an App Router route-to rule?
+
+    Rule numbers change on every filter reload while states live on, so the
+    rule label (rlabel) is used when the state has one.
+    """
+    if st.get("rlabel"):
+        return ("label:" + st["rlabel"]) in routed
+    return st["rule"] in routed
 
 
 def rule_tables(rule, prefix):
@@ -143,7 +162,6 @@ def table_has(table, ip):
 
 
 def check(rules, prefix, states, routed, names, match_domain, clients_of, has=table_has):
-    routed_numbers = set(routed)
     out = []
     for rule in rules:
         tables = rule_tables(rule, prefix)
@@ -156,7 +174,7 @@ def check(rules, prefix, states, routed, names, match_domain, clients_of, has=ta
             if not host or not (match_domain(host) & tables):
                 continue
             key = (st["client"], st["cport"], st["dst"], st["dport"], st["proto"])
-            ok = st["rule"] in routed_numbers
+            ok = state_routed(st, routed)
             conns[key] = conns.get(key, False) or ok
             conns.setdefault(("host",) + key, host)
         routed_n = sum(1 for k, v in conns.items() if k[0] != "host" and v)

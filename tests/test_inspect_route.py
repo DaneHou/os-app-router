@@ -43,7 +43,8 @@ def statuses(res):
 
 def test_parse_route_to(ir):
     rt = ir.parse_route_to(ROUTE_TO_RULES)
-    assert set(rt) == {56, 75}      # outbound gateway rules (@76/@77) are not "pass in"
+    assert {k for k in rt if isinstance(k, int)} == {56, 75}   # outbound gateway rules (@76/@77) are not "pass in"
+    assert rt["label:x"] is rt[75]
     assert rt[75]["gw_if"] == "pgw_China" and rt[75]["src"] == f"<approuter_clients_{H}:1>"
 
 

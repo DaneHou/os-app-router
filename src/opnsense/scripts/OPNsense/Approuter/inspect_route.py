@@ -30,6 +30,7 @@ import leak_check as lc  # noqa: E402
 UNBOUND_ZONES = "/usr/local/etc/unbound.opnsense.d/approuter_dns.conf"
 DOMAIN_RE = re.compile(r"^(?=.{1,253}$)([a-z0-9_]([a-z0-9_\-]{0,61}[a-z0-9])?\.)+[a-z][a-z0-9\-]{0,62}$")
 ROUTE_TO_RE = re.compile(r"^@(\d+)\s+pass in .*?\bon (\S+) route-to \((\S+) ([0-9.]+)\).*? from (\S+) to (\S+)")
+LABEL_RE = re.compile(r'\blabel "([^"]+)"')
 MAX_IPS = 24
 MAX_CONNECTIONS = 300
 
@@ -111,8 +112,12 @@ def parse_route_to(text):
     for line in text.splitlines():
         m = ROUTE_TO_RE.match(line)
         if m:
-            out[int(m.group(1))] = {"iface": m.group(2), "gw_if": m.group(3), "gw_ip": m.group(4),
-                                    "src": m.group(5), "dst": m.group(6)}
+            entry = {"iface": m.group(2), "gw_if": m.group(3), "gw_ip": m.group(4),
+                     "src": m.group(5), "dst": m.group(6)}
+            out[int(m.group(1))] = entry
+            lab = LABEL_RE.search(line)
+            if lab:
+                out["label:" + lab.group(1)] = entry
     return out
 
 
@@ -127,9 +132,14 @@ def default_route(run=subprocess.run):
     return gw or "?", iface or "?"
 
 
-def describe_path(rule_no, route_to, rules, prefix, default):
-    """Human-readable path for the state created by pf rule rule_no."""
-    rt = route_to.get(rule_no)
+def describe_path(st, route_to, rules, prefix, default):
+    """Human-readable path for a state, from the rule that created it.
+
+    Rule numbers change on every filter reload while states live on, so the
+    state's rule label (rlabel) is preferred.
+    """
+    rule_no = st["rule"]
+    rt = route_to.get("label:" + st["rlabel"]) if st.get("rlabel") else route_to.get(rule_no)
     if rt is None:
         return {"kind": "default", "label": f"default route via {default[1]} ({default[0]})"}
     names = [r.get("description") or r["uuid"] for r in rule_for_source_token(rt["src"], rules, prefix)]
@@ -150,7 +160,7 @@ def connections_of(client, states, route_to, rules, prefix, names, default, only
         c["age"] = max(c["age"], st["age"])
         if st["inbound"] or c["path"] is None:
             # the inbound state (client interface) decides the path
-            path = describe_path(st["rule"], route_to, rules, prefix, default)
+            path = describe_path(st, route_to, rules, prefix, default)
             if st["inbound"] or path["kind"] != "default":
                 c["path"] = path
     for c in conns.values():

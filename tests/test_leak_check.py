@@ -8,7 +8,7 @@ from conftest import load_script
 STATES = """\
 all tcp 110.242.72.117:443 <- 10.10.0.3:55077       ESTABLISHED:ESTABLISHED
    [1 + 2] wscale 7  [3 + 4] wscale 6
-   age 00:01:46, expires in 00:00:44, 19:17 pkts, 3799:8641 bytes, rule 75, rlabel 2d97
+   age 00:01:46, expires in 00:00:44, 19:17 pkts, 3799:8641 bytes, rule 75, rlabel x
 all tcp 172.31.175.169:32169 (10.10.0.3:55077) -> 110.242.72.117:443       ESTABLISHED:ESTABLISHED
    [1 + 2] wscale 6  [3 + 4] wscale 7
    age 00:01:46, expires in 00:00:44, 19:17 pkts, 3799:8641 bytes, rule 76, rlabel e277, allow-opts
@@ -43,13 +43,14 @@ def test_parse_states(lc):
     st = lc.parse_states(STATES)
     assert len(st) == 7
     base = {"proto": "tcp", "client": "10.10.0.3", "cport": "55077", "dst": "110.242.72.117", "dport": "443"}
-    assert st[0] == dict(base, rule=75, inbound=True, bytes=3799 + 8641, age=106)
-    assert st[1] == dict(base, rule=76, inbound=False, bytes=3799 + 8641, age=106)
+    assert st[0] == dict(base, rule=75, inbound=True, bytes=3799 + 8641, age=106, rlabel="x")
+    assert st[1] == dict(base, rule=76, inbound=False, bytes=3799 + 8641, age=106, rlabel="e277")
     assert st[2]["dst"] == "23.46.216.204" and st[2]["rule"] == 80
 
 
 def test_parse_routed_rules(lc):
-    assert lc.parse_routed_rules(RULES, "approuter") == {56: {"approuter_custom_a6a42fca"}, 75: {"approuter_video_iqiyi"}}
+    assert lc.parse_routed_rules(RULES, "approuter") == {56: {"approuter_custom_a6a42fca"}, 75: {"approuter_video_iqiyi"},
+                                                          "label:x": {"approuter_video_iqiyi"}}
 
 
 def test_check_classifies_and_dedupes(lc):
@@ -84,3 +85,17 @@ def test_names_dump_prunes(dns_watcher, tmp_path):
     dns_watcher.dump_names(path, now=9100)
     data = json.loads(open(path).read())
     assert data["names"] == {"2.2.2.2": ["m.iqiyi.com", 9000]}
+
+
+def test_rlabel_beats_stale_rule_number(lc):
+    states = lc.parse_states("""\
+all tcp 192.178.212.95:443 <- 10.10.0.4:58624       ESTABLISHED:ESTABLISHED
+   age 09:00:56, expires in 15:03:50, 29:61 pkts, 6264:62746 bytes, rule 75, rlabel 62579b766853977eefd10b92c8e9c651
+""")
+    assert states[0]["rlabel"] == "62579b766853977eefd10b92c8e9c651"
+    routed = lc.parse_routed_rules(RULES, "approuter")
+    assert routed["label:x"] == {"approuter_video_iqiyi"}
+    # rule 75 is an App Router rule *now*, but the state was made by the Vpnlink rule
+    assert lc.state_routed(states[0], routed) is False
+    states[0]["rlabel"] = "x"
+    assert lc.state_routed(states[0], routed) is True
