@@ -185,6 +185,8 @@ a prober that was down longer, start in fallback mode and need 3 passing probes 
 
 The first gateway in priority order that passes the probe becomes active. If it fails, the next gateway is tried. The last gateway always acts as fallback.
 
+The prober (`geo_prober.py`) runs only while at least one enabled rule has Smart Gateway on **and** two or more gateways. With a single gateway the toggle has no effect; the health check lists such rules.
+
 ### Resolve DNS via Gateway
 
 Some sites pick their server by the location of the **DNS resolver**: a China site resolved from abroad hands out an overseas CDN edge, and that edge may redirect to the international site (e.g. m.iqiyi.com search → www.iq.com) or refuse service, even though the traffic itself goes through the gateway.
@@ -202,6 +204,7 @@ Notes:
 - Choose a DNS server your other DNS settings don't use, because all traffic to that address goes through the gateway. If two rules use the same server with different gateways, the later rule is skipped. If a domain is in several rules, the first rule wins.
 - `china_all` is an IP list, so it has no domains to forward.
 - **DNS servers in front of Unbound (AdGuard Home, Pi-hole):** they must forward these domains to Unbound, otherwise they resolve the domains themselves. The domain list is in `/usr/local/etc/app-router/dns_via_gateway.txt`. In AdGuard Home add one upstream line per domain, e.g. `[/iqiyi.com/]127.0.0.1:53530` (Unbound's port). Domain-specific upstreams for the same domain are combined, so remove that domain from any other upstream list.
+- **After Apply:** the filter reload interrupts Unbound's queries to the DNS server, and Unbound would answer SERVFAIL for these domains for about a minute. App Router waits until the route to the DNS server is back, then runs `unbound-control flush_infra <dns server>` and `unbound-control flush_zone <domain>` for its own forward zones only, and repeats once or twice if Unbound still answers SERVFAIL (`configctl approuter unbound_flush`, logged as `approuter: unbound_flush: ...`).
 - **Checked automatically:** after every update App Router asks port 53 for a marker record (`_approuter-check.<first domain>` TXT) that only Unbound knows. If the answer doesn't come back, the Status tab warns that queries don't reach Unbound and names the server on port 53.
 
 ### Route Inspector
@@ -230,7 +233,24 @@ The same is available from the shell: `configctl approuter inspect_trace <ip> <d
 - **IP not learned:** the client got the address from a DNS answer App Router didn't see, for example its own DNS or DoH (browser "secure DNS", iCloud Private Relay), or an answer it cached before the rule existed.
 - **Old state:** the connection was opened before the IP was learned.
 
+The last result is kept in `/usr/local/etc/app-router/leak_check_last.json` (root only) for the health check.
+
 The Status tab also warns about enabled rules whose interface no longer exists or is disabled, because such rules get no firewall rule at all.
+
+### Health Check
+
+`configctl approuter healthcheck` prints the plugin health contract JSON (`{"checks":[{"name","ok","severity","detail"}]}`, `ok: null` = not applicable), read by Netbaseline. Read-only and fast (no traffic, no leak check run):
+
+| Check | Severity | Fails when |
+|---|---|---|
+| Plugin enabled | info | never (`null` when disabled) |
+| DNS forward reaches Unbound | medium | port 53 doesn't forward the forward zones to Unbound (`dns_forward_status.json`) |
+| Firewall rules and tables loaded | medium | an enabled rule has no route-to rule in pf, or a category table is missing |
+| DNS watcher running | medium | dns_watcher or its tcpdump sniffers are not running |
+| Rule gateways up | medium | a gateway used by an enabled rule is down or missing |
+| Device sources resolved | low | none of a rule's devices (MAC alias) currently has an IPv4 address |
+| Smart gateway prober | low | smart rules exist but geo_prober is not running |
+| Last leak check | low | the last stored leak check (max 8 days old) found leaks |
 
 ### List Sources
 
@@ -367,6 +387,8 @@ src/
 │   ├── list_updater.py             # Fetch/process remote lists, write domain mappings and CIDR files
 │   ├── dns_watcher.py              # DNS sniffer daemon (tcpdump-based), learned IP expiry
 │   ├── geo_prober.py               # Smart gateway connectivity prober
+│   ├── unbound_flush.py            # Clears Unbound failures for forward zones after Apply
+│   ├── healthcheck.py              # `configctl approuter healthcheck` (plugin health contract)
 │   ├── table_manager.sh            # pfctl table operations
 │   ├── diagnose.sh                 # Manual troubleshooting helper (sh diagnose.sh <domain>)
 │   └── app_categories.json         # Built-in domain categories

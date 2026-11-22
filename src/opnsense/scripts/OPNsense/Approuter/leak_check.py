@@ -21,6 +21,8 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import dns_watcher as dw  # noqa: E402
 
 NAMES_FILE = dw.NAMES_FILE
+# Last result, read by healthcheck.py (which never runs the leak check itself)
+LAST_FILE = os.path.join(dw.APPROUTER_DIR, "leak_check_last.json")
 MAX_LEAKS_PER_RULE = 50
 
 # "IF PROTO A [(A')] -> B" (outbound state, A' = address before NAT) or
@@ -229,7 +231,21 @@ def main():
     if names_age is None or names_age > 300:
         result["status"] = "warning"
         result["message"] = "No recent DNS name data: is the DNS watcher running?"
+    save_last(result)
     print(json.dumps(result))
+
+
+def save_last(result, path=None):
+    """Keep the result for the health check; best effort (root-only, it lists client IPs)."""
+    path = path or LAST_FILE
+    try:
+        tmp = path + ".tmp"
+        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "w") as f:
+            json.dump(result, f)
+        os.replace(tmp, path)
+    except OSError:
+        pass
 
 
 if __name__ == "__main__":

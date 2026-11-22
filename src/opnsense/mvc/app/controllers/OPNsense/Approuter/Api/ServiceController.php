@@ -59,10 +59,13 @@ class ServiceController extends ApiMutableServiceControllerBase
             $backend->configdRun('approuter dns_watcher_stop');
             $backend->configdRun('approuter dns_watcher_start');
 
-            // Stop geo_prober before filter reload (will restart after if needed)
-            $backend->configdRun('approuter geo_prober_stop');
+            // Stop geo_prober before filter reload (will restart after if needed).
+            // It only runs for Smart Gateway rules with 2+ gateways.
+            if (is_file('/var/run/approuter_geo_prober.pid')) {
+                $backend->configdRun('approuter geo_prober_stop');
+            }
 
-            // filter reload can be slow — run async to avoid PHP timeout
+            // Synchronous (configdpRun waits for the reload to finish)
             $backend->configdpRun('filter reload');
 
             // Explicitly load client tables from files (OPNsense registerTable
@@ -126,6 +129,14 @@ class ServiceController extends ApiMutableServiceControllerBase
             // resolution ran before the tables existed. SIGHUP triggers a fresh
             // load_domain_mappings + resolve_and_update with tables now in place.
             $backend->configdRun('approuter dns_watcher_reload');
+
+            // "Resolve DNS via gateway": during the filter reload Unbound's
+            // queries to the forward server time out, and it would answer
+            // SERVFAIL for the forward zones for about a minute. Clear the
+            // failures (infra + zone cache of App Router's zones only) once
+            // the route is back. Detached and best effort: never delays or
+            // fails Apply; no-op without forward zones.
+            $backend->configdRun('approuter unbound_flush', true);
 
             $status = "ok";
         }

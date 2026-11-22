@@ -1,0 +1,1 @@
+{"status": "ok", "checked_at": 1795290000, "states": 812, "known_names": 2400, "names_age": 20, "rules": [{"rule": "my-mbp", "routed": 14, "leaked": 0, "leaks": []}, {"rule": "my-iphone", "routed": 3, "leaked": 0, "leaks": []}, {"rule": "wg-phone", "routed": 0, "leaked": 0, "leaks": []}, {"rule": "kids", "routed": 2, "leaked": 0, "leaks": []}]}

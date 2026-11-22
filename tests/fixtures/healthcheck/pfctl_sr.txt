@@ -1,0 +1,8 @@
+pass in quick on igc2 route-to (pgw_China 172.31.175.170) inet from <approuter_clients_e0b37761> to <approuter_custom_e0b37761> flags S/SA keep state label "f22966cdaf0362e184c10c6f2cf64129"
+pass in quick on igc2 route-to (pgw_China 172.31.175.170) inet from <approuter_clients_e0b37761> to <approuter_video_iqiyi> flags S/SA keep state label "2d971401685845d8bfe7292153978ec5"
+pass in quick on igc2 route-to (pgw_China 172.31.175.170) inet from <ar_6f877413_mac> to <approuter_video_iqiyi> flags S/SA keep state label "3b2e"
+pass in quick on wg0 route-to (pgw_China 172.31.175.170) inet from <approuter_clients_e05f85e8> to <approuter_video_iqiyi> flags S/SA keep state label "4c3f"
+pass in quick on igc1 route-to (igc0 198.18.0.1) inet from <Kids> to <approuter_video_bilibili_gw0> flags S/SA keep state label "5d40"
+pass in quick on igc1 route-to (pgw_China 172.31.175.170) inet from <Kids> to <approuter_video_bilibili> flags S/SA keep state label "6e51"
+pass out log route-to (pgw_China 172.31.175.170) inet from (pgw_China) to ! (pgw_China:network) flags S/SA keep state allow-opts label "7f62"
+pass in quick on wg0 inet from 10.10.0.0/24 to any flags S/SA keep state label "8a73"

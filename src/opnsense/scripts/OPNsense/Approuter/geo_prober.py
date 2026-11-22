@@ -706,14 +706,15 @@ def main():
         signal.signal(signal.SIGINT, cleanup)
         signal.signal(signal.SIGHUP, reload_config)
 
-        log(f"Geo prober started (PID {os.getpid()})")
-
+        # Only rules with Smart Gateway on and 2+ gateways need the prober.
+        # Apply and the service hook start it only then, but a manual start
+        # (or a rule with a single gateway) must not log on every run: exit
+        # quietly before writing anything.
         smart_rules = load_config()
         if not smart_rules:
-            log("No smart gateway rules found, exiting")
             sys.exit(0)
 
-        log(f"Found {len(smart_rules)} smart gateway rules")
+        log(f"Geo prober started (PID {os.getpid()}), {len(smart_rules)} smart gateway rules")
 
         # Initialize: resume the previous gateway decisions of unchanged
         # rules (Apply restarts us; flushing would leave the _gwN tables

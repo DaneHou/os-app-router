@@ -99,3 +99,11 @@ all tcp 192.178.212.95:443 <- 10.10.0.4:58624       ESTABLISHED:ESTABLISHED
     assert lc.state_routed(states[0], routed) is False
     states[0]["rlabel"] = "x"
     assert lc.state_routed(states[0], routed) is True
+
+
+def test_save_last_is_private(lc, tmp_path):
+    path = tmp_path / "leak_check_last.json"
+    lc.save_last({"checked_at": 1, "rules": []}, str(path))
+    assert json.loads(path.read_text()) == {"checked_at": 1, "rules": []}
+    assert (path.stat().st_mode & 0o777) == 0o600
+    lc.save_last({"x": 1}, str(tmp_path / "missing" / "f.json"))   # unwritable: ignored

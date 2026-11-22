@@ -1,0 +1,20 @@
+{
+  "WAN_DHCP": {
+    "name": "WAN_DHCP",
+    "address": "198.18.0.1",
+    "status": "none",
+    "status_translated": "Online",
+    "monitor": "~",
+    "delay": "~",
+    "loss": "~"
+  },
+  "FRP_GW": {
+    "name": "FRP_GW",
+    "address": "172.31.175.170",
+    "status": "none",
+    "status_translated": "Online",
+    "monitor": "~",
+    "delay": "~",
+    "loss": "~"
+  }
+}

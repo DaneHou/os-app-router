@@ -1,5 +1,5 @@
 PLUGIN_NAME=	os-app-router
-PLUGIN_VERSION=	1.0.0
+PLUGIN_VERSION=	1.1.0
 PLUGIN_COMMENT=	Application-aware routing plugin for OPNsense
 
 PREFIX?=	/usr/local
@@ -75,6 +75,8 @@ install-plugin:
 	@cp src/opnsense/scripts/OPNsense/Approuter/dns_routes.py $(PLUGIN_SCRIPTS)/
 	@cp src/opnsense/scripts/OPNsense/Approuter/leak_check.py $(PLUGIN_SCRIPTS)/
 	@cp src/opnsense/scripts/OPNsense/Approuter/inspect_route.py $(PLUGIN_SCRIPTS)/
+	@cp src/opnsense/scripts/OPNsense/Approuter/unbound_flush.py $(PLUGIN_SCRIPTS)/
+	@cp src/opnsense/scripts/OPNsense/Approuter/healthcheck.py $(PLUGIN_SCRIPTS)/
 	@cp src/opnsense/scripts/OPNsense/Approuter/dns_forward.php $(PLUGIN_SCRIPTS)/
 	@cp src/opnsense/scripts/OPNsense/Approuter/diagnose.sh $(PLUGIN_SCRIPTS)/
 	@cp src/opnsense/scripts/OPNsense/Approuter/app_categories.json $(PLUGIN_SCRIPTS)/
@@ -180,6 +182,7 @@ uninstall:
 	@rm -f /var/run/approuter_dns_watcher.pid
 	@rm -f /var/run/approuter_geo_prober.pid
 	@rm -f $(PLUGIN_CONF)/smart_gateway_state.json
+	@rm -f $(PLUGIN_CONF)/leak_check_last.json
 	@rm -f /tmp/opnsense_menu_cache.xml 2>/dev/null || true
 	@rm -rf /tmp/approuter
 	@# Preserve config.json (user settings) - only remove if explicitly asked
@@ -229,6 +232,8 @@ lint:
 	@python3 -m py_compile src/opnsense/scripts/OPNsense/Approuter/dns_watcher.py
 	@python3 -m py_compile src/opnsense/scripts/OPNsense/Approuter/geo_prober.py
 	@python3 -m py_compile src/opnsense/scripts/OPNsense/Approuter/static_sync.py
+	@python3 -m py_compile src/opnsense/scripts/OPNsense/Approuter/unbound_flush.py
+	@python3 -m py_compile src/opnsense/scripts/OPNsense/Approuter/healthcheck.py
 	@echo ">>> Checking XML files..."
 	@find src -name '*.xml' -exec xmllint --noout {} \; 2>/dev/null || echo "(xmllint not available, skipping)"
 	@echo ">>> All checks passed."

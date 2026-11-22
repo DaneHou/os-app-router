@@ -175,3 +175,27 @@ def test_restored_gateway_survives_single_failed_probe(gp, monkeypatch):
     assert states[0]["available"] is True
     assert states[0]["consecutive_fail"] == 1
     assert gp.calls == []  # no flush until DEBOUNCE_COUNT failures
+
+
+def test_start_without_smart_rules_exits_silently(tmp_path, monkeypatch):
+    """Rules with Smart Gateway on but a single gateway: no log line, no state files."""
+    mod = load_script("geo_prober")
+    cfg = tmp_path / "config.json"
+    cfg.write_text(json.dumps({"table_prefix": "approuter", "rules": [
+        {"uuid": "u1", "description": "my-mbp", "gateway": "FRP_GW", "smart_gateway": "1",
+         "categories": "video.iqiyi", "custom_domains": ""},
+        {"uuid": "u2", "description": "x", "gateway": "WAN_DHCP,FRP_GW", "smart_gateway": "0",
+         "categories": "video.iqiyi", "custom_domains": ""},
+    ]}))
+    logged = []
+    monkeypatch.setattr(mod, "CONFIG_FILE", str(cfg))
+    monkeypatch.setattr(mod, "STATE_FILE", str(tmp_path / "state.json"))
+    monkeypatch.setattr(mod, "PERSIST_FILE", str(tmp_path / "persist.json"))
+    monkeypatch.setattr(mod, "log", lambda *a, **k: logged.append(a[0]))
+    monkeypatch.setattr(mod.signal, "signal", lambda *a: None)
+    monkeypatch.setattr(mod.sys, "argv", ["geo_prober.py", "start"])
+    with pytest.raises(SystemExit) as e:
+        mod.main()
+    assert e.value.code == 0
+    assert logged == []
+    assert list(tmp_path.iterdir()) == [cfg]

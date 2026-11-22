@@ -141,6 +141,8 @@ CIDRs:   203.0.113.10
 
 优先级最高且探测通过的网关成为活跃网关；若失败，则尝试下一个；最后一个网关始终作为兜底。
 
+只有当至少一条已启用规则开启了智能网关**并且**选择了两个或以上网关时，探测进程（`geo_prober.py`）才会运行。只有一个网关时这个开关不起作用，健康检查会列出这类规则。
+
 ### 经网关解析 DNS
 
 有些网站是按 **DNS 解析器所在的位置**来分配服务器的。在海外解析国内网站，拿到的是海外 CDN 节点。这个节点可能把你跳转到国际版（例如 m.iqiyi.com 的搜索会跳到 www.iq.com），也可能直接拒绝服务，即使你的流量本身已经走了网关。
@@ -158,6 +160,7 @@ CIDRs:   203.0.113.10
 - 请选一个其他 DNS 设置没有用到的服务器，因为发往这个地址的所有流量都会走网关。如果两条规则用了同一个 DNS 服务器、却指向不同网关，后面那条会被跳过。同一个域名出现在多条规则里时，以第一条为准。
 - `china_all` 是 IP 列表，没有域名可以转发。
 - **Unbound 前面还有其他 DNS 服务（AdGuard Home、Pi-hole）时：**它们必须把这些域名转给 Unbound，否则会自己去解析。域名清单在 `/usr/local/etc/app-router/dns_via_gateway.txt`。在 AdGuard Home 里为每个域名加一行上游，例如 `[/iqiyi.com/]127.0.0.1:53530`（Unbound 的端口）。AdGuard 对同一个域名的多条上游会合并使用，所以要把这个域名从其他上游列表里去掉。
+- **Apply 之后：**防火墙重载会打断 Unbound 发往 DNS 服务器的查询，Unbound 会在大约一分钟内对这些域名返回 SERVFAIL。App Router 会等到去往 DNS 服务器的路由恢复后，只针对自己的 forward-zone 执行 `unbound-control flush_infra <DNS 服务器>` 和 `unbound-control flush_zone <域名>`；如果 Unbound 仍返回 SERVFAIL，会再重试一两次（`configctl approuter unbound_flush`，日志为 `approuter: unbound_flush: ...`）。
 - **自动检查：**每次更新后，App Router 会通过端口 53 查询一条只有 Unbound 才有的标记记录（`_approuter-check.<第一个域名>` TXT）。查不到时，Status 页面会提示查询没有到达 Unbound，并显示端口 53 上是哪个 DNS 服务。
 
 ### 路由检查器
@@ -186,7 +189,13 @@ CIDRs:   203.0.113.10
 - **IP 未学到**：设备从 App Router 看不到的 DNS 回答里拿到了地址。例如设备用了自己的 DNS 或 DoH（浏览器的"安全 DNS"、iCloud 专用代理），或者用的是规则建立之前就缓存下来的结果。
 - **旧连接**：这条连接是在 IP 学到之前就建立的。
 
+最近一次结果保存在 `/usr/local/etc/app-router/leak_check_last.json`（仅 root 可读），供健康检查使用。
+
 Status 页还会提醒：如果某条已启用的规则绑定的接口已经不存在或被禁用，这条规则不会生成任何防火墙规则。
+
+### 健康检查
+
+`configctl approuter healthcheck` 按插件健康约定输出 JSON（`{"checks":[{"name","ok","severity","detail"}]}`，`ok: null` 表示不适用），供 Netbaseline 读取。只读、很快（不发流量，也不运行泄漏检测）：插件是否启用、经网关解析 DNS 是否到达 Unbound、pf 规则和表是否加载、DNS watcher 是否运行、规则用到的网关是否在线、设备（MAC）来源当前是否有 IPv4 地址（low）、智能网关探测是否运行（low）、最近一次泄漏检测结果（low，最多 8 天内）。
 
 ### 列表源
 
@@ -323,6 +332,8 @@ src/
 │   ├── list_updater.py             # 拉取/处理远程列表，生成域名映射和 CIDR 文件
 │   ├── dns_watcher.py              # DNS 嗅探守护进程，学到的 IP 过期清理
 │   ├── geo_prober.py               # 智能网关连通性探测
+│   ├── unbound_flush.py            # Apply 后清除 Unbound 对 forward-zone 的失败缓存
+│   ├── healthcheck.py              # `configctl approuter healthcheck`（插件健康约定）
 │   ├── table_manager.sh            # pfctl 表操作
 │   ├── diagnose.sh                 # 手动排查脚本（sh diagnose.sh <域名>）
 │   └── app_categories.json         # 内置域名分类
