@@ -53,7 +53,7 @@ Web UI (Volt/jQuery) → REST API (PHP Controllers) → configd actions → Pyth
 - `dns_watcher.py` — Daemon sniffing outbound DNS responses via tcpdump, adds resolved IPs to pf tables and expires stale ones. Also runs periodic active resolution via `drill` as fallback.
 - `geo_prober.py` — Smart gateway prober (curl per gateway interface), fills/flushes `_gwN` tables. Only runs for enabled rules with smartGateway=1 and 2+ gateways; otherwise `start` exits silently.
 - `unbound_flush.py` — run detached at the end of Apply: waits for the forward servers' routes, then `unbound-control -c /var/unbound/unbound.conf flush_infra <server>` + `flush_zone <zone>` for App Router's forward zones only (clears SERVFAIL after the filter reload). Best effort, exit 0.
-- `healthcheck.py` — `configctl approuter healthcheck`, plugin health contract (`{"checks":[{name, ok, severity, detail}]}`), read-only, < 10 s. Reads `leak_check_last.json` (written by leak_check.py), never runs the leak check.
+- `healthcheck.py` — `configctl approuter healthcheck`, plugin health contract (`{"checks":[{name, ok, severity, detail}]}`), read-only, < 10 s. Reads `leak_check_last.json` (written by leak_check.py), never runs the leak check. Failing checks may carry `fix` (Netbaseline automatic repair): DNS watcher -> `dns_watcher_restart`, DNS forward -> `unbound_flush`; never a filter reload or config change.
 - `table_manager.sh` — Shell wrapper for `pfctl` table operations
 - `app_categories.json` — Built-in domain definitions (categories → apps → domains)
 

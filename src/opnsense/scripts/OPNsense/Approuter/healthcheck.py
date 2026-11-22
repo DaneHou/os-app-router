@@ -3,12 +3,19 @@
 
     configctl approuter healthcheck
 
-Prints {"checks": [{"name", "ok", "severity", "detail"}]}: ok is true, false
-or null (not applicable); severity is medium (default), low or info.
+Prints {"checks": [{"name", "ok", "severity", "detail", "fix"?}]}: ok is true,
+false or null (not applicable); severity is medium (default), low or info.
 Read-only and fast: it reads App Router's state files, pf (`pfctl -sr`,
 `-s Tables`, `-T show` of the device aliases), the core gateway status and
-the process table. It never sends traffic and never runs the leak check
-itself: it reports the last stored result.
+the process table. When the stored DNS forward check failed it asks the local
+resolver (127.0.0.1) once more for the marker record. It never sends traffic
+to other hosts and never runs the leak check itself: it reports the last
+stored result.
+
+A failing check may carry "fix" (plugin health contract): the configd action
+Netbaseline may run to repair it (restart the DNS watcher, flush Unbound's
+failures for the forward zones). Only safe, idempotent actions that do not
+change config.xml; no fix triggers a filter reload.
 """
 import hashlib
 import ipaddress
@@ -23,10 +30,12 @@ APPROUTER_DIR = "/usr/local/etc/app-router"
 CONFIG_FILE = f"{APPROUTER_DIR}/config.json"
 DNS_FORWARD_STATUS = f"{APPROUTER_DIR}/dns_forward_status.json"
 LEAK_CHECK_LAST = f"{APPROUTER_DIR}/leak_check_last.json"
+UNBOUND_ZONES = "/usr/local/etc/unbound.opnsense.d/approuter_dns.conf"
 DNS_WATCHER_PID = "/var/run/approuter_dns_watcher.pid"
 GEO_PROBER_PID = "/var/run/approuter_geo_prober.pid"
 GATEWAY_STATUS = "/usr/local/opnsense/scripts/routes/gateway_status.php"
 PFCTL = "/sbin/pfctl"
+DRILL = "/usr/bin/drill"
 
 CMD_TIMEOUT = 4
 DEADLINE = 8              # seconds: stop running commands after this
@@ -37,6 +46,13 @@ MAC_RE = re.compile(r"^[0-9a-f]{1,2}([:-])[0-9a-f]{1,2}(\1[0-9a-f]{1,2}){4}$", r
 ALIAS_RE = re.compile(r"^[A-Za-z0-9_]{1,32}$")
 # "... route-to (gw ip) inet from <src> to <dst> ..." ("route-to" itself contains "to")
 PF_FROM_TO_RE = re.compile(r"\sfrom (\S+) to (\S+)")
+# marker record dns_forward.php puts into App Router's Unbound include
+MARKER_RE = re.compile(r'local-data:\s*"(_approuter-check\.[A-Za-z0-9.\-]{1,250}?)\.?\s+\d+\s+IN\s+TXT\s+approuter"')
+
+# repairs Netbaseline may run (plugin health contract "fix"); safe, idempotent, no config.xml change
+FIX_DNS_WATCHER = {"action": "approuter dns_watcher_restart", "title": "Restart the App Router DNS watcher"}
+FIX_UNBOUND_FLUSH = {"action": "approuter unbound_flush",
+                     "title": "Flush Unbound failures for App Router forward zones"}
 
 
 class System:
@@ -79,8 +95,11 @@ class System:
         return len(out.split()) if out else 0
 
 
-def check(name, ok, detail, severity="medium"):
-    return {"name": name, "ok": ok, "severity": severity, "detail": detail}
+def check(name, ok, detail, severity="medium", fix=None):
+    out = {"name": name, "ok": ok, "severity": severity, "detail": detail}
+    if fix and ok is False:
+        out["fix"] = dict(fix)
+    return out
 
 
 def load_json(system, path, lenient=False):
@@ -199,9 +218,24 @@ def check_dns_forward(system):
     if st.get("reaches_unbound"):
         return check(name, True, f"Port 53 ({st.get('port53') or 'unknown server'}) forwards the "
                                  f"{st['zones']} zone(s) to Unbound (port {st.get('unbound_port')}){age}")
+    # the stored result is from the last Apply/list update (Unbound may have been restarting):
+    # ask port 53 for the marker record once more
+    if marker_reaches_unbound(system):
+        return check(name, True, f"Port 53 ({st.get('port53') or 'unknown server'}) forwards the "
+                                 f"{st['zones']} zone(s) to Unbound now (stored check failed{age})")
     return check(name, False, f"DNS queries on port 53 ({st.get('port53') or 'unknown server'}) do not reach "
                               f"Unbound: the {st['zones']} forward zone(s) have no effect. Forward the domains in "
-                              f"{APPROUTER_DIR}/dns_via_gateway.txt to 127.0.0.1:{st.get('unbound_port')}{age}")
+                              f"{APPROUTER_DIR}/dns_via_gateway.txt to 127.0.0.1:{st.get('unbound_port')}{age}",
+                 fix=FIX_UNBOUND_FLUSH)
+
+
+def marker_reaches_unbound(system):
+    """Does a TXT query for the marker on 127.0.0.1:53 get App Router's answer? False when unknown."""
+    m = MARKER_RE.search(system.read(UNBOUND_ZONES) or "")
+    if not m:
+        return False
+    out = system.run([DRILL, "-Q", m.group(1), "TXT", "@127.0.0.1"])
+    return "approuter" in (out or "")
 
 
 def check_pf(system, rules, prefix):
@@ -240,10 +274,11 @@ def check_dns_watcher(system, rules, prefix):
         return check(name, None, "No enabled rule with app categories or custom domains")
     if not system.pid_alive(DNS_WATCHER_PID):
         return check(name, False, "dns_watcher is not running: new CDN addresses are not learned, "
-                                  "so their traffic leaves via the default gateway")
+                                  "so their traffic leaves via the default gateway", fix=FIX_DNS_WATCHER)
     sniffers = system.count_processes("tcpdump.*-Q out")
     if sniffers == 0:
-        return check(name, False, "dns_watcher is running but has no tcpdump sniffer: DNS answers are not seen")
+        return check(name, False, "dns_watcher is running but has no tcpdump sniffer: DNS answers are not seen",
+                     fix=FIX_DNS_WATCHER)
     return check(name, True, f"dns_watcher is running with {sniffers} sniffer(s)")
 
 

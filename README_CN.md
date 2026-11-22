@@ -195,7 +195,7 @@ Status 页还会提醒：如果某条已启用的规则绑定的接口已经不�
 
 ### 健康检查
 
-`configctl approuter healthcheck` 按插件健康约定输出 JSON（`{"checks":[{"name","ok","severity","detail"}]}`，`ok: null` 表示不适用），供 Netbaseline 读取。只读、很快（不发流量，也不运行泄漏检测）：插件是否启用、经网关解析 DNS 是否到达 Unbound、pf 规则和表是否加载、DNS watcher 是否运行、规则用到的网关是否在线、设备（MAC）来源当前是否有 IPv4 地址（low）、智能网关探测是否运行（low）、最近一次泄漏检测结果（low，最多 8 天内）。
+`configctl approuter healthcheck` 按插件健康约定输出 JSON（`{"checks":[{"name","ok","severity","detail"}]}`，`ok: null` 表示不适用），供 Netbaseline 读取。只读、很快（不发流量，也不运行泄漏检测）：插件是否启用、经网关解析 DNS 是否到达 Unbound、pf 规则和表是否加载、DNS watcher 是否运行、规则用到的网关是否在线、设备（MAC）来源当前是否有 IPv4 地址（low）、智能网关探测是否运行（low）、最近一次泄漏检测结果（low，最多 8 天内）。存储的经网关解析 DNS 结果失败时，会再向 127.0.0.1:53 查询一次标记记录，这样 Unbound 重启期间产生的失败结果会自行消失。失败的检查会附带 `fix`，供 Netbaseline 的自动修复（`run.py --alert --autofix`）执行，都不修改 config.xml，也不重载防火墙：DNS watcher 未运行 → `approuter dns_watcher_restart`；DNS 未到达 Unbound → `approuter unbound_flush`；pf 规则/表缺失没有自动修复（需要 Apply 重载防火墙）。
 
 ### 列表源
 

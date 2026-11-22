@@ -252,6 +252,19 @@ The Status tab also warns about enabled rules whose interface no longer exists o
 | Smart gateway prober | low | smart rules exist but geo_prober is not running |
 | Last leak check | low | the last stored leak check (max 8 days old) found leaks |
 
+When the stored DNS forward result (written at Apply / list update) says the queries do not reach Unbound,
+the check asks `127.0.0.1:53` once more for App Router's marker record (`drill -Q _approuter-check.<zone> TXT`),
+so a failure caught while Unbound was restarting clears itself.
+
+Failing checks carry a `fix` that Netbaseline's automatic repair (`run.py --alert --autofix`) may run;
+none changes config.xml or reloads the filter:
+
+| Check | `fix` |
+|---|---|
+| DNS watcher running | `approuter dns_watcher_restart` (stop, then start the DNS watcher) |
+| DNS forward reaches Unbound | `approuter unbound_flush` (flush Unbound's failures for App Router's forward zones) |
+| Firewall rules and tables loaded | none: missing route-to rules or tables need a filter reload (Apply) |
+
 ### List Sources
 
 AppRouter downloads domain and CIDR lists on a schedule. Configure source URLs and update intervals in the **List Sources** tab. Click **Update Lists Now** for an immediate update or **Force Full Update** to bypass ETag caching.
