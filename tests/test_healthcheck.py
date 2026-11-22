@@ -72,7 +72,7 @@ def by_name(result):
 def test_contract_shape(hc, system):
     result = hc.run_checks(system)
     assert set(result) == {"checks"}
-    assert len(result["checks"]) == 8
+    assert len(result["checks"]) == 9
     for c in result["checks"]:
         assert set(c) == {"name", "ok", "severity", "detail"}
         assert isinstance(c["name"], str) and c["name"]
@@ -93,6 +93,7 @@ def test_healthy_fixture(hc, system):
         "Device sources resolved": True,
         "Smart gateway prober": True,
         "Last leak check": True,
+        "AdGuard Home upstreams": None,     # no AdGuardHome.yaml in the fixture
     }
     assert "AdGuardHom" in checks["DNS forward reaches Unbound"]["detail"]
     assert "10 min ago" in checks["DNS forward reaches Unbound"]["detail"]
@@ -121,7 +122,7 @@ def test_read_only_commands(hc, system, stored_ok):
 def test_disabled_plugin_everything_not_applicable(hc, system):
     system.files[hc.CONFIG_FILE] = fixture("config.json").replace('"enabled": 1', '"enabled": 0')
     checks = hc.run_checks(system)["checks"]
-    assert len(checks) == 8
+    assert len(checks) == 9
     assert all(c["ok"] is None for c in checks)
     assert checks[0]["detail"] == "App Router is disabled"
     assert system.ran == []

@@ -1,5 +1,5 @@
 PLUGIN_NAME=	os-app-router
-PLUGIN_VERSION=	1.3.0
+PLUGIN_VERSION=	1.4.0
 PLUGIN_COMMENT=	Application-aware routing plugin for OPNsense
 
 PREFIX?=	/usr/local
@@ -76,6 +76,7 @@ install-plugin:
 	@cp src/opnsense/scripts/OPNsense/Approuter/leak_check.py $(PLUGIN_SCRIPTS)/
 	@cp src/opnsense/scripts/OPNsense/Approuter/inspect_route.py $(PLUGIN_SCRIPTS)/
 	@cp src/opnsense/scripts/OPNsense/Approuter/unbound_flush.py $(PLUGIN_SCRIPTS)/
+	@cp src/opnsense/scripts/OPNsense/Approuter/agh_resync.py $(PLUGIN_SCRIPTS)/
 	@cp src/opnsense/scripts/OPNsense/Approuter/healthcheck.py $(PLUGIN_SCRIPTS)/
 	@cp src/opnsense/scripts/OPNsense/Approuter/dns_forward.php $(PLUGIN_SCRIPTS)/
 	@cp src/opnsense/scripts/OPNsense/Approuter/diagnose.sh $(PLUGIN_SCRIPTS)/

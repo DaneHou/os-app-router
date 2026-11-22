@@ -1,6 +1,6 @@
 <model>
     <mount>//OPNsense/Approuter</mount>
-    <version>1.0.0</version>
+    <version>1.0.1</version>
     <description>Application-Aware Routing Plugin</description>
     <items>
         <general>
@@ -40,6 +40,10 @@
                 <Mask>/^[a-z][a-z0-9_]{0,30}$/</Mask>
                 <ValidationMessage>Use lowercase letters, numbers and underscores only</ValidationMessage>
             </tablePrefix>
+            <aghSync type="BooleanField">
+                <Default>1</Default>
+                <Required>Y</Required>
+            </aghSync>
         </general>
         <rules>
             <rule type="ArrayField">

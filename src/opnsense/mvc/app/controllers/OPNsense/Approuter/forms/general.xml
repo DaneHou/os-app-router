@@ -23,4 +23,10 @@
         <type>text</type>
         <help>Prefix for pf table names (default: approuter). Tables will be named prefix_category.</help>
     </field>
+    <field>
+        <id>approuter.general.aghSync</id>
+        <label>Sync AdGuard Home upstreams</label>
+        <type>checkbox</type>
+        <help>When AdGuard Home answers DNS, keep its upstream list in line with "Resolve DNS via gateway": the domains of those rules are sent to Unbound (managed block at the top of the list), other entries for exactly those domains are removed. Done after Apply; AdGuard Home is restarted only when the list changed.</help>
+    </field>
 </form>

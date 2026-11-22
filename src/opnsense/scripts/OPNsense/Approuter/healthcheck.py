@@ -366,6 +366,25 @@ def check_leaks(system):
     return check(name, True, f"No leaks, {routed} connection(s) routed ({when})", "low")
 
 
+def check_agh(system):
+    name = "AdGuard Home upstreams"
+    try:
+        import agh_resync
+    except ImportError:
+        return check(name, None, "agh_resync not installed", "low")
+    yaml_text = system.read(agh_resync.AGH_CONF)
+    if yaml_text is None:
+        return check(name, None, "AdGuard Home not installed", "low")
+    if not agh_resync.enabled(system.read(agh_resync.CONFIG_FILE)):
+        return check(name, None, "AdGuard Home sync is off", "low")
+    domains = agh_resync.export_domains(system.read(agh_resync.EXPORT_FILE))
+    port = agh_resync.unbound_port(system.read(agh_resync.STATUS_FILE), system.read(agh_resync.UNBOUND_CONF))
+    ok, detail = agh_resync.check(yaml_text, domains, port)
+    fix = None if ok else {"action": "approuter agh_resync",
+                           "title": "Sync AdGuard Home upstreams (restarts AdGuard Home)"}
+    return check(name, ok, detail, "medium", fix=fix)
+
+
 def run_checks(system=None):
     system = system or System()
     config = load_json(system, CONFIG_FILE, lenient=True)
@@ -374,7 +393,7 @@ def run_checks(system=None):
         for name, sev in (("DNS forward reaches Unbound", "medium"), ("Firewall rules and tables loaded", "medium"),
                           ("DNS watcher running", "medium"), ("Rule gateways up", "medium"),
                           ("Device sources resolved", "low"), ("Smart gateway prober", "low"),
-                          ("Last leak check", "low")):
+                          ("Last leak check", "low"), ("AdGuard Home upstreams", "low")):
             checks.append(check(name, None, "App Router is disabled", sev))
         return {"checks": checks}
     prefix = config.get("table_prefix") or "approuter"
@@ -387,6 +406,7 @@ def run_checks(system=None):
         check_devices(system, rules),
         check_smart(system, rules),
         check_leaks(system),
+        check_agh(system),
     ]
     return {"checks": checks}
 

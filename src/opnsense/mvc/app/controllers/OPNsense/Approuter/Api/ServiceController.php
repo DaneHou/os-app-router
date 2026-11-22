@@ -138,6 +138,10 @@ class ServiceController extends ApiMutableServiceControllerBase
             // fails Apply; no-op without forward zones.
             $backend->configdRun('approuter unbound_flush', true);
 
+            // AdGuard Home on port 53: keep its upstreams sending the "via gateway"
+            // domains to Unbound (no-op when unchanged, AdGuard Home absent or sync off).
+            $backend->configdRun('approuter agh_resync', true);
+
             $status = "ok";
         }
         return ['status' => $status];
