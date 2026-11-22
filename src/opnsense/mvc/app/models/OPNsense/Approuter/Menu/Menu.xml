@@ -2,6 +2,7 @@
     <Services>
         <Approuter VisibleName="AppRouter" cssClass="fa fa-random fa-fw" url="/ui/approuter" order="50">
             <Settings VisibleName="Settings" url="/ui/approuter" order="10"/>
+            <Log VisibleName="Log File" url="/ui/diagnostics/log/core/approuter" order="20"/>
         </Approuter>
     </Services>
 </menu>

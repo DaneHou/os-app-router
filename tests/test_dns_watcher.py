@@ -252,3 +252,31 @@ def test_kill_orphan_sniffers_only_kills_reparented_tcpdump(dns_watcher, monkeyp
     monkeypatch.setattr(dns_watcher.os, "kill", lambda pid, sig: killed.append(pid))
     assert dns_watcher.kill_orphan_sniffers() == 1
     assert killed == [5572]
+
+
+def test_unbound_restart_detection(dns_watcher, tmp_path):
+    assert dns_watcher.unbound_restarted(None, 100) is False      # first look
+    assert dns_watcher.unbound_restarted(100, None) is False      # Unbound down
+    assert dns_watcher.unbound_restarted(100, 100) is False
+    assert dns_watcher.unbound_restarted(100, 200) is True
+    pid = tmp_path / "unbound.pid"
+    pid.write_text("4242\n")
+    assert dns_watcher.read_unbound_pid(str(pid)) == 4242
+    pid.write_text("garbage")
+    assert dns_watcher.read_unbound_pid(str(pid)) is None
+    assert dns_watcher.read_unbound_pid(str(tmp_path / "missing")) is None
+
+
+def test_flush_after_restart_never_raises(dns_watcher, monkeypatch):
+    import sys
+    import types
+    fake = types.ModuleType("unbound_flush")
+
+    def boom():
+        raise RuntimeError("x")
+    fake.run_flush = boom
+    monkeypatch.setitem(sys.modules, "unbound_flush", fake)
+    monkeypatch.setattr(dns_watcher, "log", lambda *a, **k: None)
+    assert dns_watcher.flush_after_unbound_restart() is None
+    fake.run_flush = lambda: {"status": "ok"}
+    assert dns_watcher.flush_after_unbound_restart() == {"status": "ok"}

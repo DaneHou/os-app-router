@@ -1,5 +1,5 @@
 PLUGIN_NAME=	os-app-router
-PLUGIN_VERSION=	1.2.0
+PLUGIN_VERSION=	1.3.0
 PLUGIN_COMMENT=	Application-aware routing plugin for OPNsense
 
 PREFIX?=	/usr/local
@@ -93,6 +93,12 @@ install-plugin:
 		$(PLUGIN_SERVICE)/templates/OPNsense/Approuter/+TARGETS
 	@cp src/opnsense/service/templates/OPNsense/Approuter/approuter.conf \
 		$(PLUGIN_SERVICE)/templates/OPNsense/Approuter/approuter.conf
+	@# syslog-ng filter: programs approuter* -> /var/log/approuter/approuter_YYYYMMDD.log, all levels
+	@# (26.x builds local log targets from these templates; the .inc syslog hook alone is not enough)
+	@mkdir -p $(PLUGIN_SERVICE)/templates/OPNsense/Syslog/local
+	@cp src/opnsense/service/templates/OPNsense/Syslog/local/approuter.conf \
+		$(PLUGIN_SERVICE)/templates/OPNsense/Syslog/local/approuter.conf
+	@mkdir -p $(DESTDIR)/var/log/approuter
 	@# Remove stale Unbound config from previous versions
 	@rm -f /var/unbound/etc/approuter.conf 2>/dev/null || true
 	@rm -f $(PLUGIN_SERVICE)/templates/OPNsense/Approuter/approuter_unbound.conf 2>/dev/null || true
@@ -132,6 +138,9 @@ activate:
 	else \
 		echo ">>> Click Apply in the UI to start dns_watcher."; \
 	fi
+	@# syslog-ng: load the App Router log target (logging only)
+	@/usr/local/sbin/configctl template reload OPNsense/Syslog >/dev/null 2>&1 || true
+	@/usr/local/sbin/configctl syslog restart >/dev/null 2>&1 || true
 	@echo ">>> Plugin activated."
 
 uninstall:
@@ -168,6 +177,9 @@ uninstall:
 	@rm -f $(PLUGIN_SERVICE)/conf/actions.d/actions_approuter.conf
 	@# Remove service templates
 	@rm -rf $(PLUGIN_SERVICE)/templates/OPNsense/Approuter
+	@rm -f $(PLUGIN_SERVICE)/templates/OPNsense/Syslog/local/approuter.conf
+	@/usr/local/sbin/configctl template reload OPNsense/Syslog >/dev/null 2>&1 || true
+	@/usr/local/sbin/configctl syslog restart >/dev/null 2>&1 || true
 	@# Remove generated Unbound config
 	@rm -f /var/unbound/etc/approuter.conf 2>/dev/null || true
 	@# Remove plugin hook

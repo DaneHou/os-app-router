@@ -6,4 +6,11 @@
             <pattern>api/approuter/*</pattern>
         </patterns>
     </page-approuter>
+    <page-approuter-log>
+        <name>WebCfg - AppRouter log</name>
+        <patterns>
+            <pattern>ui/diagnostics/log/core/approuter/*</pattern>
+            <pattern>api/diagnostics/log/core/approuter/*</pattern>
+        </patterns>
+    </page-approuter-log>
 </acl>

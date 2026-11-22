@@ -558,10 +558,37 @@ def expire_loop():
 
 
 DNS_ROUTE_CHECK_INTERVAL = 60
+UNBOUND_CHECK_INTERVAL = 10
+UNBOUND_PID_FILE = "/var/run/unbound.pid"
+
+
+def read_unbound_pid(path=UNBOUND_PID_FILE):
+    try:
+        with open(path) as f:
+            return int(f.read().strip())
+    except (OSError, ValueError):
+        return None
+
+
+def unbound_restarted(last, current):
+    """True when Unbound runs with a new pid (not on the first look, not while it is down)."""
+    return last is not None and current is not None and current != last
+
+
+def flush_after_unbound_restart():
+    """Unbound restarted on its own (Apply in Unbound, DNS reconfigure, boot, update...):
+    clear its cached failures for App Router's forward zones, like after App Router's Apply."""
+    try:
+        import unbound_flush
+        return unbound_flush.run_flush()
+    except Exception as e:
+        log(f"unbound flush after restart failed: {e}", syslog.LOG_WARNING)
+        return None
 
 
 def dns_route_loop():
-    """Keep "Resolve DNS via gateway" host routes in place (dns_routes.py).
+    """Keep "Resolve DNS via gateway" host routes in place (dns_routes.py) and
+    flush Unbound's forward-zone failures whenever Unbound restarts.
 
     Tunnel gateways recreate their interface, which drops the route.
     """
@@ -571,12 +598,28 @@ def dns_route_loop():
     except ImportError as e:
         log(f"dns_routes unavailable: {e}", syslog.LOG_WARNING)
         return
+    last_pid = read_unbound_pid()
+    next_routes = 0.0
     while True:
-        try:
-            dns_routes.ensure_routes(logger=log)
-        except Exception as e:
-            log(f"DNS route check error: {e}", syslog.LOG_ERR)
-        time.sleep(DNS_ROUTE_CHECK_INTERVAL)
+        now = time.monotonic()
+        if now >= next_routes:
+            try:
+                dns_routes.ensure_routes(logger=log)
+            except Exception as e:
+                log(f"DNS route check error: {e}", syslog.LOG_ERR)
+            next_routes = now + DNS_ROUTE_CHECK_INTERVAL
+        pid = read_unbound_pid()
+        if unbound_restarted(last_pid, pid):
+            log(f"Unbound restarted (pid {last_pid} -> {pid}): clearing cached forward-zone failures",
+                syslog.LOG_NOTICE)
+            try:
+                dns_routes.ensure_routes(logger=log)
+            except Exception as e:
+                log(f"DNS route check error: {e}", syslog.LOG_ERR)
+            flush_after_unbound_restart()
+        if pid is not None:
+            last_pid = pid
+        time.sleep(UNBOUND_CHECK_INTERVAL)
 
 
 def kill_stale_states(new_ips, client_ips):
