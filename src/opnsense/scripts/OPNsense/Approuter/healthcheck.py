@@ -39,7 +39,7 @@ DRILL = "/usr/bin/drill"
 
 CMD_TIMEOUT = 4
 DEADLINE = 8              # seconds: stop running commands after this
-LEAK_MAX_AGE = 8 * 86400  # a weekly leak check older than this is stale
+LEAK_MAX_AGE = 3 * 86400  # the leak check runs daily (cron); older than this is stale
 DOWN_STATES = {"down", "force_down"}
 
 MAC_RE = re.compile(r"^[0-9a-f]{1,2}([:-])[0-9a-f]{1,2}(\1[0-9a-f]{1,2}){4}$", re.I)
@@ -351,7 +351,7 @@ def check_leaks(system):
     name = "Last leak check"
     last = load_json(system, LEAK_CHECK_LAST)
     if not isinstance(last, dict) or not last.get("checked_at"):
-        return check(name, None, "No stored leak check result (run: configctl approuter leak_check)", "low")
+        return check(name, None, "No stored leak check result yet (runs daily at 04:45; or: configctl approuter leak_check)", "low")
     age = system.now() - last["checked_at"]
     when = f"{int(age // 3600)} h ago" if age < 172800 else f"{int(age // 86400)} days ago"
     if age > LEAK_MAX_AGE:

@@ -586,6 +586,12 @@ function approuter_cron()
                 ];
                 break;
         }
+        // daily leak check (read-only: pf states vs. rules); the result feeds
+        // "Last leak check" in configctl approuter healthcheck
+        $jobs[] = [
+            'description' => 'AppRouter leak check',
+            'autocron' => ['/usr/local/opnsense/scripts/OPNsense/Approuter/leak_check.py > /dev/null', '45', '4'],
+        ];
     }
 
     return $jobs;
