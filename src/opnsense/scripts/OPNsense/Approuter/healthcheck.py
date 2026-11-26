@@ -35,6 +35,7 @@ DNS_WATCHER_PID = "/var/run/approuter_dns_watcher.pid"
 GEO_PROBER_PID = "/var/run/approuter_geo_prober.pid"
 GATEWAY_STATUS = "/usr/local/opnsense/scripts/routes/gateway_status.php"
 PFCTL = "/sbin/pfctl"
+IFCONFIG = "/sbin/ifconfig"
 DRILL = "/usr/bin/drill"
 
 CMD_TIMEOUT = 4
@@ -385,6 +386,34 @@ def check_agh(system):
     return check(name, ok, detail, "medium", fix=fix)
 
 
+def check_ipv6(system):
+    """App Router rules (and VPN Link's access limits) are IPv4 only. Once an
+    interface has a global IPv6 address, devices can reach routed domains over
+    IPv6 by the normal uplink and the leak check does not see it."""
+    name = "No IPv6 bypass"
+    out = system.run([IFCONFIG, "-a", "inet6"])
+    if out is None:
+        return check(name, None, "Could not read the interface addresses", "low")
+    found, iface = {}, None
+    for line in out.splitlines():
+        m = re.match(r"^([A-Za-z0-9_.]+): flags=", line)
+        if m:
+            iface = m.group(1)
+            continue
+        m = re.match(r"^\s+inet6 ([0-9A-Fa-f:]+)", line)
+        if m and iface and not iface.startswith("lo"):
+            try:
+                if ipaddress.IPv6Address(m.group(1)).is_global:
+                    found.setdefault(iface, None)
+            except ValueError:
+                pass
+    if not found:
+        return check(name, True, "No global IPv6 address on the router; App Router routes IPv4, so nothing goes around it")
+    return check(name, False, "Global IPv6 on " + ", ".join(found) + ": devices can reach routed domains over IPv6, "
+                 "which App Router does not route (VPN Link limits are IPv4 only too). Turn IPv6 off there, "
+                 "or route IPv6 as well")
+
+
 def run_checks(system=None):
     system = system or System()
     config = load_json(system, CONFIG_FILE, lenient=True)
@@ -393,7 +422,8 @@ def run_checks(system=None):
         for name, sev in (("DNS forward reaches Unbound", "medium"), ("Firewall rules and tables loaded", "medium"),
                           ("DNS watcher running", "medium"), ("Rule gateways up", "medium"),
                           ("Device sources resolved", "low"), ("Smart gateway prober", "low"),
-                          ("Last leak check", "low"), ("AdGuard Home upstreams", "low")):
+                          ("Last leak check", "low"), ("AdGuard Home upstreams", "low"),
+                          ("No IPv6 bypass", "medium")):
             checks.append(check(name, None, "App Router is disabled", sev))
         return {"checks": checks}
     prefix = config.get("table_prefix") or "approuter"
@@ -407,6 +437,7 @@ def run_checks(system=None):
         check_smart(system, rules),
         check_leaks(system),
         check_agh(system),
+        check_ipv6(system),
     ]
     return {"checks": checks}
 

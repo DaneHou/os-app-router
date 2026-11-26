@@ -25,6 +25,8 @@ Usage: agh_resync.py [--check] [--no-restart]
   --no-restart  write the file but leave the restart to the caller
 Exit 0 always; the JSON status says what happened.
 """
+import contextlib
+import fcntl
 import json
 import os
 import re
@@ -43,6 +45,10 @@ STATUS_FILE = os.path.join(APPROUTER_DIR, "dns_forward_status.json")
 RESULT_FILE = os.path.join(APPROUTER_DIR, "agh_resync_last.json")
 BACKUP_FILE = os.path.join(APPROUTER_DIR, "AdGuardHome.yaml.bak")
 UNBOUND_CONF = "/var/unbound/unbound.conf"
+# Shared with VPN Link (bind_hosts): one writer of AdGuardHome.yaml at a time,
+# held from reading the file until AdGuard Home has restarted on the result.
+AGH_LOCK = "/var/run/adguardhome-yaml.lock"
+AGH_RESTART = ["/usr/local/sbin/configctl", "adguardhome", "restart"]
 
 BEGIN = "# --- App Router: DNS via gateway (managed) ---"
 END = "# --- App Router end ---"
@@ -220,6 +226,41 @@ def agh_running():
     return subprocess.run(["/bin/pgrep", "-x", "AdGuardHome"], capture_output=True).returncode == 0
 
 
+@contextlib.contextmanager
+def agh_lock(timeout=60):
+    fd = os.open(AGH_LOCK, os.O_RDWR | os.O_CREAT, 0o600)
+    try:
+        deadline = time.monotonic() + timeout
+        while True:
+            try:
+                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except BlockingIOError:
+                if time.monotonic() > deadline:
+                    raise TimeoutError("AdGuardHome.yaml is being changed by another writer")
+                time.sleep(0.2)
+        yield
+    finally:
+        os.close(fd)
+
+
+def restart_checked(backup):
+    """Restart AdGuard Home on the new file. AdGuard Home exits at once on a
+    file it cannot use, and then every client in the house loses DNS: if it is
+    not running a few seconds later, put the previous file back and restart.
+    -> (running, rolled_back)"""
+    subprocess.run(AGH_RESTART, capture_output=True, text=True, timeout=60)
+    time.sleep(3)
+    if agh_running():
+        time.sleep(1)
+        if agh_running():
+            return True, False
+    log("AdGuard Home did not stay up on the new AdGuardHome.yaml; restoring the previous file")
+    write_atomic(AGH_CONF, read(backup))
+    subprocess.run(AGH_RESTART, capture_output=True, text=True, timeout=60)
+    return False, True
+
+
 def run(argv):
     check_only = "--check" in argv
     no_restart = "--no-restart" in argv
@@ -235,16 +276,25 @@ def run(argv):
     result.update(summary)
     if check_only or new_text is None:
         return result
-    os.makedirs(APPROUTER_DIR, exist_ok=True)
-    shutil.copy2(AGH_CONF, BACKUP_FILE)
-    os.chmod(BACKUP_FILE, 0o600)
-    write_atomic(AGH_CONF, new_text)
-    log(f"AdGuard Home upstreams updated: {summary['domains']} domain(s) -> {summary['upstream']}, "
-        f"{summary['conflicts_removed']} conflicting entry(ies) removed")
-    if not no_restart and agh_running():
-        rc = subprocess.run(["/usr/local/sbin/configctl", "adguardhome", "restart"],
-                            capture_output=True, text=True, timeout=60).returncode
-        result["restarted"] = rc == 0
+    with agh_lock():
+        # plan again under the lock: another writer may have changed the file meanwhile
+        yaml_text = read(AGH_CONF)
+        new_text, summary = plan(yaml_text, domains, port)
+        result.update(summary)
+        if new_text is None:
+            return result
+        os.makedirs(APPROUTER_DIR, exist_ok=True)
+        shutil.copy2(AGH_CONF, BACKUP_FILE)
+        os.chmod(BACKUP_FILE, 0o600)
+        was_running = agh_running()
+        write_atomic(AGH_CONF, new_text)
+        log(f"AdGuard Home upstreams updated: {summary['domains']} domain(s) -> {summary['upstream']}, "
+            f"{summary['conflicts_removed']} conflicting entry(ies) removed")
+        if not no_restart and was_running:
+            result["restarted"], rolled_back = restart_checked(BACKUP_FILE)
+            if rolled_back:
+                result.update(status="error", rolled_back=True,
+                              reason="AdGuard Home did not start on the new file; previous file restored")
     return result
 
 

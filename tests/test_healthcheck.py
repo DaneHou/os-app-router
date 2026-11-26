@@ -17,6 +17,15 @@ def fixture(name):
         return f.read()
 
 
+IFCONFIG_V4_ONLY = """igc0: flags=1008843<UP,BROADCAST,RUNNING,SIMPLEX,MULTICAST,LOWER_UP> metric 0 mtu 1500
+\tinet6 fe80::1%igc0 prefixlen 64 scopeid 0x1
+lo0: flags=1008049<UP,LOOPBACK,RUNNING,MULTICAST,LOWER_UP> metric 0 mtu 16384
+\tinet6 ::1 prefixlen 128
+wg0: flags=10080c1<UP,RUNNING,NOARP,MULTICAST,LOWER_UP> metric 0 mtu 1420
+\tinet6 fd00:10::1 prefixlen 64
+"""
+
+
 class FakeSystem:
     """Firewall as seen by healthcheck.py, built from the fixture files."""
 
@@ -33,6 +42,7 @@ class FakeSystem:
             (hc.PFCTL, "-t", "ar_6f877413_mac", "-T", "show"): fixture("ar_6f877413_mac.txt"),
             (hc.GATEWAY_STATUS,): fixture("gateway_status.json"),
             ("/bin/pgrep", "-f", "tcpdump.*-Q out"): "101\n102\n103\n104\n",
+            (hc.IFCONFIG, "-a", "inet6"): IFCONFIG_V4_ONLY,
         }
         self.pids = {hc.DNS_WATCHER_PID: True, hc.GEO_PROBER_PID: True}
         self.ran = []
@@ -72,7 +82,7 @@ def by_name(result):
 def test_contract_shape(hc, system):
     result = hc.run_checks(system)
     assert set(result) == {"checks"}
-    assert len(result["checks"]) == 9
+    assert len(result["checks"]) == 10
     for c in result["checks"]:
         assert set(c) == {"name", "ok", "severity", "detail"}
         assert isinstance(c["name"], str) and c["name"]
@@ -94,6 +104,7 @@ def test_healthy_fixture(hc, system):
         "Smart gateway prober": True,
         "Last leak check": True,
         "AdGuard Home upstreams": None,     # no AdGuardHome.yaml in the fixture
+        "No IPv6 bypass": True,
     }
     assert "AdGuardHom" in checks["DNS forward reaches Unbound"]["detail"]
     assert "10 min ago" in checks["DNS forward reaches Unbound"]["detail"]
@@ -112,7 +123,9 @@ def test_read_only_commands(hc, system, stored_ok):
         system.files[hc.UNBOUND_ZONES] = MARKER_CONF
     hc.run_checks(system)
     for argv in system.ran:
-        assert argv[0] in (hc.PFCTL, hc.GATEWAY_STATUS, "/bin/pgrep", hc.DRILL)
+        assert argv[0] in (hc.PFCTL, hc.GATEWAY_STATUS, "/bin/pgrep", hc.DRILL, hc.IFCONFIG)
+        if argv[0] == hc.IFCONFIG:
+            assert argv == (hc.IFCONFIG, "-a", "inet6")
         if argv[0] == hc.PFCTL:
             assert argv[1:] in (("-sr",), ("-s", "Tables")) or argv[-2:] == ("-T", "show")
         if argv[0] == hc.DRILL:         # one query to the local resolver, only after a stored failure
@@ -122,7 +135,7 @@ def test_read_only_commands(hc, system, stored_ok):
 def test_disabled_plugin_everything_not_applicable(hc, system):
     system.files[hc.CONFIG_FILE] = fixture("config.json").replace('"enabled": 1', '"enabled": 0')
     checks = hc.run_checks(system)["checks"]
-    assert len(checks) == 9
+    assert len(checks) == 10
     assert all(c["ok"] is None for c in checks)
     assert checks[0]["detail"] == "App Router is disabled"
     assert system.ran == []
@@ -329,3 +342,16 @@ def test_runs_as_script_without_firewall(tmp_path):
                           capture_output=True, text=True, timeout=15)
     assert proc.returncode == 0
     assert "checks" in json.loads(proc.stdout)
+
+
+def test_ipv6_on_a_lan_is_a_bypass(hc, system):
+    system.commands[(hc.IFCONFIG, "-a", "inet6")] = IFCONFIG_V4_ONLY + (
+        "igc2: flags=1008843<UP,BROADCAST,RUNNING> metric 0 mtu 1500\n"
+        "\tinet6 2001:db8:1::1 prefixlen 64\n\tinet6 2600:1700:1::1 prefixlen 64\n")
+    c = by_name(hc.run_checks(system))["No IPv6 bypass"]
+    assert c["ok"] is False and "igc2" in c["detail"] and "igc0" not in c["detail"] and "wg0" not in c["detail"]
+
+
+def test_ipv6_unreadable_is_not_applicable(hc, system):
+    del system.commands[(hc.IFCONFIG, "-a", "inet6")]
+    assert by_name(hc.run_checks(system))["No IPv6 bypass"]["ok"] is None

@@ -90,6 +90,8 @@ def test_run_writes_backup_keeps_mode_and_restarts_only_on_change(agh, tmp_path,
                  "UNBOUND_CONF": tmp_path / "none"}.items():
         monkeypatch.setattr(agh, k, str(v))
     calls = []
+    monkeypatch.setattr(agh, "AGH_LOCK", str(tmp_path / "agh.lock"))
+    monkeypatch.setattr(agh.time, "sleep", lambda s: None)
     monkeypatch.setattr(agh, "agh_running", lambda: True)
     monkeypatch.setattr(agh.subprocess, "run", lambda argv, **kw: calls.append(argv) or type("R", (), {"returncode": 0})())
     monkeypatch.setattr(agh, "log", lambda *a, **k: None)
@@ -135,3 +137,52 @@ def test_folded_long_values_are_one_item(agh):
     assert "very.long.example.com/]https://doh.pub/dns-query\n      https://dns.alidns.com" in new
     assert "[/iqiyi.com/]https://doh.pub" not in new and "      https://dns.alidns.com/dns-query'\n    - '[/71" not in new
     assert new.count("[/71.am/]") == 1 and new.endswith('  upstream_dns_file: ""\n')
+
+
+def test_restart_failure_restores_previous_file(agh, tmp_path, monkeypatch):
+    """AdGuard Home exits on a file it cannot use (whole-house DNS outage): put the old one back."""
+    conf = tmp_path / "AdGuardHome.yaml"
+    conf.write_text(YAML)
+    d = tmp_path / "ar"
+    d.mkdir()
+    (d / "config.json").write_text('{"enabled": 1}')
+    (d / "dns_via_gateway.txt").write_text("iqiyi.com\n71.am\n")
+    (d / "dns_forward_status.json").write_text('{"unbound_port": 53530}')
+    for k, v in {"AGH_CONF": conf, "APPROUTER_DIR": d, "CONFIG_FILE": d / "config.json",
+                 "EXPORT_FILE": d / "dns_via_gateway.txt", "STATUS_FILE": d / "dns_forward_status.json",
+                 "RESULT_FILE": d / "last.json", "BACKUP_FILE": d / "bak.yaml",
+                 "UNBOUND_CONF": tmp_path / "none", "AGH_LOCK": tmp_path / "agh.lock"}.items():
+        monkeypatch.setattr(agh, k, str(v))
+    state = {"restarts": 0}
+
+    def fake_run(argv, **kw):
+        if argv == agh.AGH_RESTART:
+            state["restarts"] += 1
+        return type("R", (), {"returncode": 0})()
+
+    # running before the change, gone after the first restart, back after the second
+    monkeypatch.setattr(agh, "agh_running", lambda: state["restarts"] != 1)
+    monkeypatch.setattr(agh.subprocess, "run", fake_run)
+    monkeypatch.setattr(agh.time, "sleep", lambda s: None)
+    monkeypatch.setattr(agh, "log", lambda *a, **k: None)
+    monkeypatch.setattr(os, "chown", lambda *a: None)
+    r = agh.run([])
+    assert r["status"] == "error" and r["rolled_back"] is True and r["restarted"] is False
+    assert conf.read_text() == YAML and state["restarts"] == 2
+
+
+def test_lock_is_exclusive(agh, tmp_path, monkeypatch):
+    import fcntl
+    lock = tmp_path / "agh.lock"
+    monkeypatch.setattr(agh, "AGH_LOCK", str(lock))
+    monkeypatch.setattr(agh.time, "sleep", lambda s: None)
+    fd = os.open(lock, os.O_RDWR | os.O_CREAT)
+    fcntl.flock(fd, fcntl.LOCK_EX)
+    try:
+        with pytest.raises(TimeoutError):
+            with agh.agh_lock(timeout=0):
+                pass
+    finally:
+        os.close(fd)
+    with agh.agh_lock(timeout=0):
+        pass
