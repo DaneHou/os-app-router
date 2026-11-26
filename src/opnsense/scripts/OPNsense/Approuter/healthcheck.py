@@ -260,7 +260,8 @@ def check_pf(system, rules, prefix):
         parts = []
         if missing_rules:
             parts.append("no route-to rule loaded for: " + ", ".join(missing_rules) +
-                         " (interface missing/disabled, no valid source, or Apply pending)")
+                         " (its gateway is gone, so that traffic is blocked; or the interface is "
+                         "missing/disabled, no valid source, or Apply pending)")
         if missing_tables:
             parts.append("pf tables missing: " + ", ".join(sorted(missing_tables)))
         return check(name, False, "; ".join(parts))

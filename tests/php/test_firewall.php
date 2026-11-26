@@ -9,14 +9,22 @@ namespace OPNsense\Firewall {
     class Plugin
     {
         public $tables = [];
-        public $rules = [];
+        public $rules = [];     // pass (route-to) rules, as before
+        public $blocks = [];    // the kill-switch block behind each of them
+        public $order = [];     // everything in registration order
         public function registerTable($name, $persist = false, $file = null)
         {
             $this->tables[$name] = ['persist' => $persist, 'file' => $file];
         }
         public function registerFilterRule($prio, $conf, $defaults = null)
         {
-            $this->rules[] = ['prio' => $prio] + array_merge($defaults ?? [], $conf);
+            $r = ['prio' => $prio] + array_merge($defaults ?? [], $conf);
+            $this->order[] = $r;
+            if (($r['type'] ?? '') === 'block') {
+                $this->blocks[] = $r;
+            } else {
+                $this->rules[] = $r;
+            }
         }
     }
 }
@@ -298,6 +306,25 @@ namespace {
         $check('alias model unreadable: referenced by name', ($fw->rules[0]['from'] ?? null) === '<' . mac_alias() . '>');
     });
 
+    run_case('kill_switch_block_behind_every_route', function ($check) {
+        [$fw] = hook([mkrule(['customDomains' => 'example.cn']),
+                      mkrule(['uuid' => '700da3ee-0000-4000-8000-000000000002', 'smartGateway' => '1',
+                              'gateway' => 'WAN_DHCP,FRP_GW', 'sourceNets' => 'Kids_MAC'])]);
+        $check('some routes', count($fw->rules) >= 4);
+        $check('as many blocks as routes', count($fw->blocks) === count($fw->rules));
+        $ok = true;
+        for ($i = 0; $i < count($fw->order); $i += 2) {
+            $p = $fw->order[$i];
+            $b = $fw->order[$i + 1] ?? [];
+            $ok = $ok && ($p['type'] ?? '') === 'pass' && !empty($p['skip_rules_gw_down']) && !empty($p['gateway'])
+                && ($b['type'] ?? '') === 'block' && !isset($b['gateway']) && !empty($b['quick'])
+                && $b['from'] === $p['from'] && $b['to'] === $p['to'] && $b['interface'] === $p['interface']
+                && $b['direction'] === $p['direction'] && $b['prio'] === $p['prio']
+                && $b['#ref'] === $p['#ref'] . ':block';
+        }
+        $check('each pass(route-to, skipped when its gateway is gone) is followed by the same match as block', $ok);
+    });
+
     run_case('existing_rules_identical_output', function ($check) {
         $rules = json_decode(file_get_contents(__DIR__ . '/fixtures/existing_rules.json'), true);
         $expected = json_decode(file_get_contents(__DIR__ . '/fixtures/existing_rules_expected.json'), true);
@@ -312,7 +339,7 @@ namespace {
             ['rules' => $fw->rules, 'tables' => $fw->tables, 'files' => $files],
             JSON_UNESCAPED_SLASHES
         )), true);
-        $check('pf rules identical to 3f051c9', $got['rules'] === $expected['rules']);
+        $check('pf rules identical to 3f051c9 (plus skip_rules_gw_down)', $got['rules'] == $expected['rules']);
         $check('tables identical', $got['tables'] === $expected['tables']);
         $check('client files identical', $got['files'] === $expected['files']);
         $check('my-mbp via FRP_GW', $got['rules'][0]['gateway'] === 'FRP_GW'

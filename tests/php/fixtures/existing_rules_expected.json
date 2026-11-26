@@ -12,7 +12,8 @@
             "direction": "in",
             "interface": "opt1",
             "descr": "AppRouter: my-mbp via FRP_GW",
-            "#ref": "approuter:700da3ee-4336-4ebd-9c12-23750865952d:custom"
+            "#ref": "approuter:700da3ee-4336-4ebd-9c12-23750865952d:custom",
+            "skip_rules_gw_down": true
         },
         {
             "prio": 2,
@@ -26,7 +27,8 @@
             "direction": "in",
             "interface": "opt1",
             "descr": "AppRouter: my-mbp via FRP_GW",
-            "#ref": "approuter:700da3ee-4336-4ebd-9c12-23750865952d"
+            "#ref": "approuter:700da3ee-4336-4ebd-9c12-23750865952d",
+            "skip_rules_gw_down": true
         },
         {
             "prio": 3,
@@ -40,7 +42,8 @@
             "direction": "in",
             "interface": "opt1",
             "descr": "AppRouter: my-studio via FRP_GW",
-            "#ref": "approuter:c3e29e49-087e-4fb2-83b4-c1b07f61223c"
+            "#ref": "approuter:c3e29e49-087e-4fb2-83b4-c1b07f61223c",
+            "skip_rules_gw_down": true
         },
         {
             "prio": 4,
@@ -54,7 +57,8 @@
             "direction": "in",
             "interface": "opt1",
             "descr": "AppRouter: my-iMac via FRP_GW",
-            "#ref": "approuter:e7ba9c24-8577-4188-9b13-bacbb9bc5733"
+            "#ref": "approuter:e7ba9c24-8577-4188-9b13-bacbb9bc5733",
+            "skip_rules_gw_down": true
         },
         {
             "prio": 5,
@@ -68,7 +72,8 @@
             "direction": "in",
             "interface": "opt6",
             "descr": "AppRouter: wg-flyer via FRP_GW",
-            "#ref": "approuter:3ee28171-7e72-4c1d-b2f3-29b6161323e6:custom"
+            "#ref": "approuter:3ee28171-7e72-4c1d-b2f3-29b6161323e6:custom",
+            "skip_rules_gw_down": true
         },
         {
             "prio": 6,
@@ -82,7 +87,8 @@
             "direction": "in",
             "interface": "opt6",
             "descr": "AppRouter: wg-flyer via FRP_GW",
-            "#ref": "approuter:3ee28171-7e72-4c1d-b2f3-29b6161323e6"
+            "#ref": "approuter:3ee28171-7e72-4c1d-b2f3-29b6161323e6",
+            "skip_rules_gw_down": true
         },
         {
             "prio": 7,
@@ -96,7 +102,8 @@
             "direction": "in",
             "interface": "opt6",
             "descr": "AppRouter: wg-mbp via FRP_GW",
-            "#ref": "approuter:48bedf51-01d9-4c4e-868b-c4c01c50103a:custom"
+            "#ref": "approuter:48bedf51-01d9-4c4e-868b-c4c01c50103a:custom",
+            "skip_rules_gw_down": true
         },
         {
             "prio": 8,
@@ -110,7 +117,8 @@
             "direction": "in",
             "interface": "opt6",
             "descr": "AppRouter: wg-mbp via FRP_GW",
-            "#ref": "approuter:48bedf51-01d9-4c4e-868b-c4c01c50103a"
+            "#ref": "approuter:48bedf51-01d9-4c4e-868b-c4c01c50103a",
+            "skip_rules_gw_down": true
         }
     ],
     "tables": {
