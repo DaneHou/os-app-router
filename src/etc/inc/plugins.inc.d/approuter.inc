@@ -542,6 +542,37 @@ function approuter_services()
 }
 
 /**
+ * Boot: pf comes up with empty category tables and nothing else starts the
+ * DNS watcher, so routing by domain would stay off until someone pressed
+ * Apply (or a health job repaired it). Start the plugin's services here and
+ * merge the static lists back in; the watcher re-adds the IPs it learned
+ * before the reboot (ip_seen.json). Runs after the filter and DNS are up.
+ */
+function approuter_configure()
+{
+    return [
+        'bootup' => ['approuter_boot:20'],
+    ];
+}
+
+function approuter_boot($verbose = false)
+{
+    $services = approuter_services();   /* empty unless App Router is enabled */
+    if (empty($services)) {
+        return;
+    }
+    service_log('Starting App Router...', $verbose);
+    /* large lists: merge in the background, do not hold up the boot */
+    configd_run('approuter reload_tables', true);
+    foreach ($services as $service) {
+        foreach ($service['configd']['start'] ?? [] as $cmd) {
+            configd_run($cmd);
+        }
+    }
+    service_log("done.\n", $verbose);
+}
+
+/**
  * Register syslog targets
  */
 function approuter_syslog()

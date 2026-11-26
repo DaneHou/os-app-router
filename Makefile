@@ -1,5 +1,5 @@
 PLUGIN_NAME=	os-app-router
-PLUGIN_VERSION=	1.4.0
+PLUGIN_VERSION=	1.4.1
 PLUGIN_COMMENT=	Application-aware routing plugin for OPNsense
 
 PREFIX?=	/usr/local
