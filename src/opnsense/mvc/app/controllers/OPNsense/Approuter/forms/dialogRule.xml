@@ -47,7 +47,7 @@ IPs/subnets: type and press Enter (192.168.1.0/24, 10.0.0.5). Aliases are refere
         <id>rule.dnsViaGateway</id>
         <label>Resolve DNS via Gateway</label>
         <type>checkbox</type>
-        <help><![CDATA[Resolve the domains of this rule (categories and custom domains) through the rule's first gateway, using the DNS server below.<br/>
+        <help><![CDATA[Resolve the domains of this rule (categories and custom domains) through the rule's gateway, using the DNS server below.<br/>
 Use it when a site still sends you to its international version, or refuses service, although its traffic goes through the gateway: many CDNs choose the server by the location of the DNS resolver, not of the client.<br/>
 <ul>
 <li>Applies to all clients that resolve these domains through Unbound, not only to this rule's sources.</li>
@@ -64,37 +64,7 @@ Use it when a site still sends you to its international version, or refuses serv
     <field>
         <id>rule.gateway</id>
         <label>Gateway</label>
-        <type>select_multiple</type>
-        <help>Select gateways in priority order (first = highest priority, last = fallback)</help>
-    </field>
-    <field>
-        <id>rule.smartGateway</id>
-        <label>Smart Gateway</label>
-        <type>checkbox</type>
-        <help>Enable automatic gateway probing and failover (requires 2+ gateways)</help>
-    </field>
-    <field>
-        <id>rule.probeUrl</id>
-        <label>Probe URL</label>
-        <type>text</type>
-        <help>http(s) URL to test through each gateway. Leave empty to use https://www.google.com. Examples: https://www.iqiyi.com/ (video), https://music.163.com/ (music)</help>
-    </field>
-    <field>
-        <id>rule.probeInterval</id>
-        <label>Probe Interval</label>
-        <type>text</type>
-        <help>Seconds between probes (30-3600, default 300). Lower = faster failover but more traffic</help>
-    </field>
-    <field>
-        <id>rule.probeMethod</id>
-        <label>Probe Method</label>
         <type>dropdown</type>
-        <help>Connect: TCP reachability. Status Code: HTTP 403/451 = blocked. Body Match: regex on response body. Latency: pick fastest gateway</help>
-    </field>
-    <field>
-        <id>rule.probePattern</id>
-        <label>Probe Pattern</label>
-        <type>text</type>
-        <help>Regex to detect geo-restriction in response body. Match = blocked. Example: 地区限制|not available|geo.restricted</help>
+        <help>The exit this traffic leaves through. While it is gone (disabled, deleted, its interface missing) the traffic is blocked, it never leaves another way.</help>
     </field>
 </form>

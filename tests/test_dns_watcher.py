@@ -64,17 +64,6 @@ def test_expiry_disabled(dns_watcher, monkeypatch):
     assert deleted == {}
 
 
-def test_expiry_also_cleans_active_gw_tables(dns_watcher, monkeypatch):
-    tables = {"approuter_video": ["1.1.1.1"], "approuter_video_gw0": ["1.1.1.1"]}
-    deleted = _fake_pf(monkeypatch, dns_watcher, tables)
-    dns_watcher.domain_table_map = {"x.com": {"approuter_video"}}
-    dns_watcher.active_gw_tables = {"approuter_video_gw0"}
-    dns_watcher.settings.update(table_prefix="approuter", expire_seconds=10)
-    dns_watcher.ip_seen = {"approuter_video": {"1.1.1.1": 0}}
-    dns_watcher.expire_stale_entries()
-    assert deleted == {"approuter_video": {"1.1.1.1"}, "approuter_video_gw0": {"1.1.1.1"}}
-
-
 def test_rule_interface_devices(dns_watcher, monkeypatch, tmp_path):
     cfg = tmp_path / "config.xml"
     cfg.write_text("<opnsense><interfaces><lan><if>igc1</if></lan><opt1><if>vlan0.10</if></opt1>"
@@ -122,12 +111,11 @@ def _fake_pf_add(monkeypatch, dns_watcher, tables):
 
 
 def test_restore_readds_fresh_learned_ips(dns_watcher, monkeypatch):
-    tables = {"approuter_video_iqiyi": [], "approuter_video_iqiyi_gw0": []}
+    tables = {"approuter_video_iqiyi": []}
     monkeypatch.setattr(dns_watcher, "show_table", lambda t: tables.get(t))
     added = _fake_pf_add(monkeypatch, dns_watcher, tables)
     dns_watcher.domain_table_map = {"iqiyi.com": {"approuter_video_iqiyi", "approuter_gone"},
                                     "x.com": {"approuter_unmapped_never"}}
-    dns_watcher.active_gw_tables = {"approuter_video_iqiyi_gw0"}
     dns_watcher.settings.update(expire_seconds=3600)
     now = time.time()
     dns_watcher.ip_seen = {
@@ -136,7 +124,7 @@ def test_restore_readds_fresh_learned_ips(dns_watcher, monkeypatch):
         "approuter_other": {"4.4.4.4": now},         # no longer mapped: not restored
     }
     assert dns_watcher.restore_seen() == 1
-    assert added == {"approuter_video_iqiyi": {"1.1.1.1"}, "approuter_video_iqiyi_gw0": {"1.1.1.1"}}
+    assert added == {"approuter_video_iqiyi": {"1.1.1.1"}}
 
 
 def test_expiry_keeps_fresh_ips_missing_from_pf(dns_watcher, monkeypatch):

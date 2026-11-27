@@ -12,7 +12,7 @@ Route traffic from specific LAN clients through designated gateways based on dom
 - **China IP Category**: Route every mainland China network (chnroutes2) through a gateway — no DNS involved
 - **Per-client Rules**: Apply routing to specific LAN IPs/subnets, or to all traffic (`any`)
 - **Custom Domains**: Add per-rule domains beyond built-in categories — subdomains auto-matched
-- **Smart Gateway**: Automatic gateway selection with connectivity probing and priority-based fallback
+- **Kill switch**: While a rule's gateway is gone (disabled, deleted, interface missing) its traffic is blocked, never sent out another way
 - **Auto-updating Lists**: Scheduled fetching of domain and CIDR lists from remote sources
 - **Web UI**: Full OPNsense MVC integration with settings, rule management, and live status dashboard
 - **pf Table Integration**: Native FreeBSD packet filter tables for zero-copy routing decisions
@@ -78,8 +78,7 @@ Each rule routes traffic from a source (LAN clients) to a gateway based on categ
 | Source | Client filter: `any`, IPs/subnets and/or firewall aliases (Host, Network, MAC address, ...), mixed freely |
 | App Categories | One or more built-in or custom categories |
 | Custom Domains | Extra domains for this rule only; subdomains auto-matched |
-| Gateway | Target gateway — select multiple to enable Smart Gateway |
-| Smart Gateway | Enable automatic gateway probing and fallback (requires 2+ gateways) |
+| Gateway | The gateway this traffic leaves through; while it is gone the traffic is blocked |
 
 ### General Settings
 
@@ -161,32 +160,6 @@ CIDRs:   203.0.113.10
 
 Then create a routing rule using `Work VPN` as the category and your VPN gateway as the target.
 
-### Smart Gateway
-
-Smart Gateway enables automatic failover between multiple gateways by probing connectivity.
-
-**Setup:**
-1. In a routing rule, select **two or more gateways** (priority order top → bottom)
-2. Enable the **Smart Gateway** toggle
-3. Choose a probe method:
-   - `connect_only` — TCP/TLS connect test (fast)
-   - `status_code` — HTTP 2xx/3xx passes; 403/451 count as geo-blocked
-   - `body_match` — **Probe Pattern** (regex) matched in the body means blocked
-   - `latency` — use the fastest passing gateway
-4. Set **Probe URL** (`http://` or `https://` only, default `https://www.google.com`) and **Probe Interval** (30–3600 seconds)
-
-A gateway switches after 3 consistent probe results, with at most one switch per 5 minutes.
-
-Gateway decisions are saved in `/usr/local/etc/app-router/smart_gateway_persist.json` when the prober
-stops. **Apply** restarts the prober; rules whose gateways, categories and probe settings are unchanged
-resume their previous decision (the `_gwN` tables are refreshed from the main table instead of being
-flushed), as long as the saved state is younger than `max(2 x probe interval, 10 min)`. Changed rules, or
-a prober that was down longer, start in fallback mode and need 3 passing probes again.
-
-The first gateway in priority order that passes the probe becomes active. If it fails, the next gateway is tried. The last gateway always acts as fallback.
-
-The prober (`geo_prober.py`) runs only while at least one enabled rule has Smart Gateway on **and** two or more gateways. With a single gateway the toggle has no effect; the health check lists such rules.
-
 ### Resolve DNS via Gateway
 
 Some sites pick their server by the location of the **DNS resolver**: a China site resolved from abroad hands out an overseas CDN edge, and that edge may redirect to the international site (e.g. m.iqiyi.com search → www.iq.com) or refuse service, even though the traffic itself goes through the gateway.
@@ -246,10 +219,9 @@ The Status tab also warns about enabled rules whose interface no longer exists o
 | Plugin enabled | info | never (`null` when disabled) |
 | DNS forward reaches Unbound | medium | port 53 doesn't forward the forward zones to Unbound (`dns_forward_status.json`) |
 | Firewall rules and tables loaded | medium | an enabled rule has no route-to rule in pf, or a category table is missing |
-| DNS watcher running | medium | dns_watcher or its tcpdump sniffers are not running |
+| DNS watcher running | medium | dns_watcher or its tcpdump sniffers are not running, or no DNS answer was parsed for an hour (learning stopped) |
 | Rule gateways up | medium | a gateway used by an enabled rule is down or missing |
 | Device sources resolved | low | none of a rule's devices (MAC alias) currently has an IPv4 address |
-| Smart gateway prober | low | smart rules exist but geo_prober is not running |
 | Last leak check | low | the last stored leak check (max 8 days old) found leaks |
 
 When the stored DNS forward result (written at Apply / list update) says the queries do not reach Unbound,
@@ -365,7 +337,7 @@ The list is only used by rules with the **China Mainland IPs (CIDR list)** categ
 
 - Only DNS responses the firewall *sends* are trusted (`tcpdump -Q out`), so LAN hosts cannot inject addresses with forged packets.
 - Domains from remote lists and user input are validated before they are written anywhere; the runtime config is rendered with JSON escaping.
-- Probe URLs are restricted to http/https; temporary files use private `mktemp` paths.
+- Temporary files use private `mktemp` paths.
 
 ## Development
 
@@ -399,7 +371,6 @@ src/
 ├── opnsense/scripts/.../Approuter/
 │   ├── list_updater.py             # Fetch/process remote lists, write domain mappings and CIDR files
 │   ├── dns_watcher.py              # DNS sniffer daemon (tcpdump-based), learned IP expiry
-│   ├── geo_prober.py               # Smart gateway connectivity prober
 │   ├── unbound_flush.py            # Clears Unbound failures for forward zones after Apply
 │   ├── healthcheck.py              # `configctl approuter healthcheck` (plugin health contract)
 │   ├── table_manager.sh            # pfctl table operations

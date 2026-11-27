@@ -12,7 +12,7 @@
 - **中国 IP 分类**：将所有中国大陆网段（chnroutes2）路由到指定网关，不依赖 DNS
 - **按客户端分流**：可针对特定 LAN IP/子网设置规则，也可应用于全部流量（`any`）
 - **自定义域名**：为每条规则添加额外域名，自动匹配子域名
-- **智能网关**：基于连通性探测的自动网关选择，支持优先级和故障转移
+- **出口断开即拦截**：规则的网关不可用（被停用、删除或接口消失）时，这部分流量直接拦截，不会改走其他出口
 - **列表自动更新**：定时从远程源拉取域名和 CIDR 列表
 - **Web 管理界面**：完整的 OPNsense MVC 集成，包含设置、规则管理和实时状态面板
 - **pf 表集成**：使用 FreeBSD 原生 pf 表实现零拷贝路由决策
@@ -78,8 +78,7 @@ rm -rf /usr/local/etc/app-router
 | Source | 客户端过滤：`any`、IP/子网和/或防火墙别名（Host、Network、MAC 地址等），可混用 |
 | App Categories | 一个或多个内置/自定义分类 |
 | Custom Domains | 仅用于此规则的额外域名，自动匹配子域名 |
-| Gateway | 目标网关——选择多个可启用智能网关 |
-| Smart Gateway | 启用自动探测和故障转移（需选择 2 个或以上网关） |
+| Gateway | 这部分流量走的网关；网关不可用时流量被拦截 |
 
 ### 通用设置
 
@@ -122,26 +121,6 @@ CIDRs:   203.0.113.10
 ```
 
 然后创建一条路由规则，选择 `Work VPN` 分类，目标网关设为 VPN 网关即可。
-
-### 智能网关
-
-智能网关通过探测连通性实现多网关间的自动切换。
-
-**配置步骤：**
-1. 在路由规则中选择**两个或以上**网关（优先级从上到下）
-2. 启用 **Smart Gateway** 开关
-3. 选择探测方式：
-   - `connect_only`：TCP/TLS 连接测试（快速）
-   - `status_code`：HTTP 2xx/3xx 视为通过，403/451 视为地区封锁
-   - `body_match`：响应体匹配 **Probe Pattern**（正则）即视为封锁
-   - `latency`：选择通过探测且延迟最低的网关
-4. 填写 **Probe URL**（仅限 `http://` 或 `https://`，默认 `https://www.google.com`）和 **Probe Interval**（30–3600 秒）
-
-连续 3 次结果一致才会切换网关，且每 5 分钟最多切换一次。
-
-优先级最高且探测通过的网关成为活跃网关；若失败，则尝试下一个；最后一个网关始终作为兜底。
-
-只有当至少一条已启用规则开启了智能网关**并且**选择了两个或以上网关时，探测进程（`geo_prober.py`）才会运行。只有一个网关时这个开关不起作用，健康检查会列出这类规则。
 
 ### 经网关解析 DNS
 
@@ -195,7 +174,7 @@ Status 页还会提醒：如果某条已启用的规则绑定的接口已经不�
 
 ### 健康检查
 
-`configctl approuter healthcheck` 按插件健康约定输出 JSON（`{"checks":[{"name","ok","severity","detail"}]}`，`ok: null` 表示不适用），供 Netbaseline 读取。只读、很快（不发流量，也不运行泄漏检测）：插件是否启用、经网关解析 DNS 是否到达 Unbound、pf 规则和表是否加载、DNS watcher 是否运行、规则用到的网关是否在线、设备（MAC）来源当前是否有 IPv4 地址（low）、智能网关探测是否运行（low）、最近一次泄漏检测结果（low，最多 8 天内）。存储的经网关解析 DNS 结果失败时，会再向 127.0.0.1:53 查询一次标记记录，这样 Unbound 重启期间产生的失败结果会自行消失。失败的检查会附带 `fix`，供 Netbaseline 的自动修复（`run.py --alert --autofix`）执行，都不修改 config.xml，也不重载防火墙：DNS watcher 未运行 → `approuter dns_watcher_restart`；DNS 未到达 Unbound → `approuter unbound_flush`；pf 规则/表缺失没有自动修复（需要 Apply 重载防火墙）。
+`configctl approuter healthcheck` 按插件健康约定输出 JSON（`{"checks":[{"name","ok","severity","detail"}]}`，`ok: null` 表示不适用），供 Netbaseline 读取。只读、很快（不发流量，也不运行泄漏检测）：插件是否启用、经网关解析 DNS 是否到达 Unbound、pf 规则和表是否加载、DNS watcher 是否运行（一小时没有解析到任何 DNS 应答也算失败）、规则用到的网关是否在线、设备（MAC）来源当前是否有 IPv4 地址（low）、最近一次泄漏检测结果（low，最多 8 天内）。存储的经网关解析 DNS 结果失败时，会再向 127.0.0.1:53 查询一次标记记录，这样 Unbound 重启期间产生的失败结果会自行消失。失败的检查会附带 `fix`，供 Netbaseline 的自动修复（`run.py --alert --autofix`）执行，都不修改 config.xml，也不重载防火墙：DNS watcher 未运行 → `approuter dns_watcher_restart`；DNS 未到达 Unbound → `approuter unbound_flush`；pf 规则/表缺失没有自动修复（需要 Apply 重载防火墙）。
 
 ### 列表源
 
@@ -297,7 +276,7 @@ CDN 域名会根据解析器位置和时间返回不同的 IP，DNS 嗅探器会
 
 - 只信任防火墙*发出*的 DNS 响应（`tcpdump -Q out`），LAN 主机无法通过伪造数据包注入 IP
 - 远程列表和用户输入的域名在写入前都会校验；运行时配置经 JSON 转义生成
-- Probe URL 仅允许 http/https；临时文件使用私有的 `mktemp` 路径
+- 临时文件使用私有的 `mktemp` 路径
 
 ## 开发
 
@@ -331,7 +310,6 @@ src/
 ├── opnsense/scripts/.../Approuter/
 │   ├── list_updater.py             # 拉取/处理远程列表，生成域名映射和 CIDR 文件
 │   ├── dns_watcher.py              # DNS 嗅探守护进程，学到的 IP 过期清理
-│   ├── geo_prober.py               # 智能网关连通性探测
 │   ├── unbound_flush.py            # Apply 后清除 Unbound 对 forward-zone 的失败缓存
 │   ├── healthcheck.py              # `configctl approuter healthcheck`（插件健康约定）
 │   ├── table_manager.sh            # pfctl 表操作

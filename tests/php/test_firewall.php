@@ -43,7 +43,7 @@ namespace {
         return array_merge([
             'uuid' => UUID, 'description' => 'my-mbp', 'sourceNets' => '192.168.70.124/32',
             'categories' => ['video.iqiyi'], 'customDomains' => '', 'gateway' => 'FRP_GW',
-            'interface' => 'opt1', 'smartGateway' => '0',
+            'interface' => 'opt1',
         ], $over);
     }
 
@@ -155,21 +155,33 @@ namespace {
     });
 
     run_case('category_tables_stay_fileless', function ($check) {
-        [$fw] = hook([mkrule(['sourceNets' => '10.0.0.1,Family', 'gateway' => 'WAN_DHCP,FRP_GW', 'smartGateway' => '1',
-                              'customDomains' => 'example.com'])]);
-        foreach (['approuter_video_iqiyi', 'approuter_video_iqiyi_gw0', 'approuter_custom_' . substr(md5(UUID), 0, 8)] as $t) {
+        [$fw] = hook([mkrule(['sourceNets' => '10.0.0.1,Family', 'customDomains' => 'example.com'])]);
+        foreach (['approuter_video_iqiyi', 'approuter_custom_' . substr(md5(UUID), 0, 8)] as $t) {
             $check("$t persistent without file", ($fw->tables[$t] ?? null) === ['persist' => true, 'file' => null]);
         }
         $check('client table has file', !empty($fw->tables[client_table()]['file']));
+        $check('no _gwN tables', preg_grep('/_gw\d+$/', array_keys($fw->tables)) === []);
     });
 
-    run_case('smart_gateway_rules_use_alias_sources', function ($check) {
-        [$fw, , $valid] = hook([mkrule(['sourceNets' => 'Kids_MAC', 'gateway' => 'WAN_DHCP,FRP_GW', 'smartGateway' => '1'])]);
-        $check('gw rule + fallback rule', count($fw->rules) === 2);
-        $check('gw0 rule', $fw->rules[0]['to'] === '<approuter_video_iqiyi_gw0>' && $fw->rules[0]['gateway'] === 'WAN_DHCP');
-        $check('fallback rule', $fw->rules[1]['to'] === '<approuter_video_iqiyi>' && $fw->rules[1]['gateway'] === 'FRP_GW');
-        $check('both from alias', $fw->rules[0]['from'] === '<Kids_MAC>' && $fw->rules[1]['from'] === '<Kids_MAC>');
-        $check('valid gw tables', $valid['gwTables'] === ['approuter_video_iqiyi_gw0']);
+    run_case('rule_uses_first_gateway', function ($check) {
+        // configs from before 1.5.0 could list several gateways (Smart Gateway): the first is used
+        [$fw, , $valid] = hook([mkrule(['sourceNets' => 'Kids_MAC', 'gateway' => 'WAN_DHCP,FRP_GW', 'smartGateway' => '1',
+                                        'customDomains' => 'example.org'])]);
+        $check('one route per table', count($fw->rules) === 2);
+        $check('all via the first gateway', array_unique(array_column($fw->rules, 'gateway')) === ['WAN_DHCP']);
+        $check('category and custom tables', array_column($fw->rules, 'to') === ['<approuter_custom_' . substr(md5(UUID), 0, 8) . '>', '<approuter_video_iqiyi>']);
+        $check('from alias', $fw->rules[0]['from'] === '<Kids_MAC>');
+        $check('no gwTables key', !isset($valid['gwTables']));
+    });
+
+    run_case('orphan_tables_removed', function ($check) {
+        $valid = ['clientTables' => ['approuter_clients_aaaaaaaa'], 'customTables' => ['approuter_custom_bbbbbbbb']];
+        $pf = ['   approuter_clients_aaaaaaaa', '   approuter_clients_deadbeef', '   approuter_custom_bbbbbbbb',
+               '   approuter_custom_cafebabe', '   approuter_video_iqiyi', '   approuter_video_iqiyi_gw0',
+               '   approuter_custom_bbbbbbbb_gw1', '   other_custom_cafebabe', '   other_video_gw0', '   bogons'];
+        $check('orphans: deleted rules and every _gwN of our prefix', approuter_orphan_tables('approuter', $valid, $pf) === [
+            'approuter_clients_deadbeef', 'approuter_custom_cafebabe', 'approuter_video_iqiyi_gw0', 'approuter_custom_bbbbbbbb_gw1',
+        ]);
     });
 
     run_case('orphan_client_files_removed', function ($check) {
@@ -308,32 +320,22 @@ namespace {
 
     run_case('kill_switch_block_behind_every_route', function ($check) {
         [$fw] = hook([mkrule(['customDomains' => 'example.cn']),
-                      mkrule(['uuid' => '700da3ee-0000-4000-8000-000000000002', 'smartGateway' => '1',
-                              'gateway' => 'WAN_DHCP,FRP_GW', 'customDomains' => 'example.org',
+                      mkrule(['uuid' => '700da3ee-0000-4000-8000-000000000002',
+                              'gateway' => 'WAN_DHCP', 'customDomains' => 'example.org',
                               'sourceNets' => 'Kids_MAC'])]);
-        $tiers = array_values(array_filter($fw->rules, fn($r) => preg_match('/:gw\d+$/', $r['#ref'])));
-        $check('smart tiers present (category + custom)', count($tiers) === 2);
-        $check('one block per non-tier route', count($fw->blocks) === count($fw->rules) - count($tiers));
+        $check('some routes', count($fw->rules) >= 4);
+        $check('as many blocks as routes', count($fw->blocks) === count($fw->rules));
         $ok = true;
-        $i = 0;
-        while ($i < count($fw->order)) {
+        for ($i = 0; $i < count($fw->order); $i += 2) {
             $p = $fw->order[$i];
-            $ok = $ok && ($p['type'] ?? '') === 'pass' && !empty($p['skip_rules_gw_down']) && !empty($p['gateway']);
-            if (preg_match('/:gw\d+$/', $p['#ref'])) {
-                // a smart tier falls through to the next tier when its gateway is gone
-                $next = $fw->order[$i + 1] ?? [];
-                $ok = $ok && ($next['type'] ?? '') === 'pass' && $next['to'] !== $p['to'];
-                $i += 1;
-                continue;
-            }
             $b = $fw->order[$i + 1] ?? [];
-            $ok = $ok && ($b['type'] ?? '') === 'block' && !isset($b['gateway']) && !empty($b['quick'])
+            $ok = $ok && ($p['type'] ?? '') === 'pass' && !empty($p['skip_rules_gw_down']) && !empty($p['gateway'])
+                && ($b['type'] ?? '') === 'block' && !isset($b['gateway']) && !empty($b['quick'])
                 && $b['from'] === $p['from'] && $b['to'] === $p['to'] && $b['interface'] === $p['interface']
                 && $b['direction'] === $p['direction'] && $b['prio'] === $p['prio']
                 && $b['#ref'] === $p['#ref'] . ':block';
-            $i += 2;
         }
-        $check('each route ends in the same match as block; smart tiers fall through to the next tier', $ok);
+        $check('each pass(route-to, skipped when its gateway is gone) is followed by the same match as block', $ok);
     });
 
     run_case('existing_rules_identical_output', function ($check) {

@@ -12,12 +12,7 @@
             "categories": "video.iqiyi",
             "custom_domains": "example.cn",
             "gateway": "FRP_GW",
-            "interface": "opt1",
-            "smart_gateway": "1",
-            "probe_url": "",
-            "probe_interval": 300,
-            "probe_method": "connect_only",
-            "probe_pattern": ""
+            "interface": "opt1"
         },
         {
             "uuid": "6f877413-0000-4000-8000-000000000002",
@@ -26,12 +21,7 @@
             "categories": "video.iqiyi",
             "custom_domains": "",
             "gateway": "FRP_GW",
-            "interface": "opt1",
-            "smart_gateway": "0",
-            "probe_url": "",
-            "probe_interval": 300,
-            "probe_method": "connect_only",
-            "probe_pattern": ""
+            "interface": "opt1"
         },
         {
             "uuid": "fadb28cc-0000-4000-8000-000000000003",
@@ -40,12 +30,7 @@
             "categories": "video.iqiyi",
             "custom_domains": "",
             "gateway": "FRP_GW",
-            "interface": "opt8",
-            "smart_gateway": "0",
-            "probe_url": "",
-            "probe_interval": 300,
-            "probe_method": "connect_only",
-            "probe_pattern": ""
+            "interface": "opt8"
         },
         {
             "uuid": "0c0ffee0-0000-4000-8000-000000000004",
@@ -53,13 +38,8 @@
             "source_nets": "Kids",
             "categories": "video.bilibili",
             "custom_domains": "",
-            "gateway": "WAN_DHCP,FRP_GW",
-            "interface": "lan",
-            "smart_gateway": "1",
-            "probe_url": "https://www.bilibili.com/",
-            "probe_interval": 300,
-            "probe_method": "status_code",
-            "probe_pattern": ""
+            "gateway": "WAN_DHCP",
+            "interface": "lan"
         },
     ]
 }

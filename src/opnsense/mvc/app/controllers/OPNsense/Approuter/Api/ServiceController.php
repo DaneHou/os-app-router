@@ -59,12 +59,6 @@ class ServiceController extends ApiMutableServiceControllerBase
             $backend->configdRun('approuter dns_watcher_stop');
             $backend->configdRun('approuter dns_watcher_start');
 
-            // Stop geo_prober before filter reload (will restart after if needed).
-            // It only runs for Smart Gateway rules with 2+ gateways.
-            if (is_file('/var/run/approuter_geo_prober.pid')) {
-                $backend->configdRun('approuter geo_prober_stop');
-            }
-
             // Synchronous (configdpRun waits for the reload to finish)
             $backend->configdpRun('filter reload');
 
@@ -107,22 +101,6 @@ class ServiceController extends ApiMutableServiceControllerBase
             // static entries and deletes only those removed from the list,
             // and skips tables no rule uses.
             $backend->configdRun('approuter reload_tables');
-            $mdl = new Approuter();
-
-            // Start geo_prober if any smart gateway rules exist
-            $hasSmartRules = false;
-            foreach ($mdl->rules->rule->iterateItems() as $uuid => $rule) {
-                if ((string)$rule->enabled === '1' && (string)$rule->smartGateway === '1') {
-                    $gateways = array_filter(array_map('trim', explode(',', (string)$rule->gateway)));
-                    if (count($gateways) > 1) {
-                        $hasSmartRules = true;
-                        break;
-                    }
-                }
-            }
-            if ($hasSmartRules) {
-                $backend->configdRun('approuter geo_prober_start');
-            }
 
             // Reload dns_watcher domain mappings now that pf tables are registered.
             // dns_watcher started earlier (before filter reload), so its initial
@@ -391,56 +369,6 @@ class ServiceController extends ApiMutableServiceControllerBase
             }
         }
         $data['rule_stats'] = $ruleStats;
-
-        // Geo prober status
-        $geoProberResponse = trim($backend->configdRun('approuter geo_prober_status'));
-        $geoProberData = json_decode($geoProberResponse, true);
-        $data['geo_prober'] = $geoProberData ?: ['running' => false];
-
-        // Smart gateway rule details
-        $smartGwStatus = [];
-        foreach ($mdl->rules->rule->iterateItems() as $uuid => $rule) {
-            if ((string)$rule->enabled === '1' && (string)$rule->smartGateway === '1') {
-                $gateways = array_values(array_filter(array_map('trim', explode(',', (string)$rule->gateway))));
-                if (count($gateways) > 1) {
-                    $ruleStatus = [
-                        'description' => (string)$rule->description ?: 'Rule ' . substr(md5($uuid), 0, 8),
-                        'gateways' => $gateways,
-                        'probe_method' => (string)$rule->probeMethod ?: 'connect_only',
-                        'probe_url' => (string)$rule->probeUrl ?: '',
-                        'active_gateway' => end($gateways),  // default: fallback
-                    ];
-
-                    // Check which _gwN tables have entries to determine active gateway
-                    // array_values: array_filter keeps keys, so [0] may not exist
-                    $categories = array_values(array_filter(array_map('trim', explode(',', (string)$rule->categories))));
-                    if (!empty($categories)) {
-                        $firstCat = $categories[0];
-                        $catTable = $tablePrefix . '_' . str_replace('.', '_', $firstCat);
-                        for ($i = 0; $i < count($gateways) - 1; $i++) {
-                            $gwTable = $catTable . '_gw' . $i;
-                            $gwEntries = [];
-                            exec("/sbin/pfctl -t " . escapeshellarg($gwTable) . " -T show 2>/dev/null", $gwEntries);
-                            $gwCount = count(array_filter($gwEntries, function ($e) {
-                                return trim($e) !== '';
-                            }));
-                            $ruleStatus['gw_tables'][] = [
-                                'table' => $gwTable,
-                                'entries' => $gwCount,
-                                'gateway' => $gateways[$i],
-                            ];
-                            if ($gwCount > 0) {
-                                $ruleStatus['active_gateway'] = $gateways[$i];
-                                break;  // Highest priority active gateway wins
-                            }
-                        }
-                    }
-
-                    $smartGwStatus[] = $ruleStatus;
-                }
-            }
-        }
-        $data['smart_gateway'] = $smartGwStatus;
 
         // Recent log entries: syslog + dns_watcher log
         $logs = [];

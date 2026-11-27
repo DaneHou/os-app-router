@@ -45,17 +45,17 @@ def test_hostile_values_produce_valid_json():
         "lists": {"customDomains": None},
         "customCategories": {"category": {"slug": "work", "label": 'Work "VPN" \\ x', "domains": "a.com"}},
         "rules": {"rule": [
-            {"@uuid": "u1", "enabled": "1", "description": 'say "hi"\\', "gateway": "WAN2",
-             "probePattern": r"\d+|地区限制", "probeInterval": ""},
+            {"@uuid": "u1", "enabled": "1", "description": 'say "hi"\\ 地区\t', "gateway": "WAN2"},
             {"@uuid": "u2", "enabled": "0"},
-            {"@uuid": "u3", "enabled": "1", "probeInterval": "60"},
+            {"@uuid": "u3", "enabled": "1"},
         ]},
     })
     config = json.loads(out)
     assert [r["uuid"] for r in config["rules"]] == ["u1", "u3"]
-    assert config["rules"][0]["probe_pattern"] == r"\d+|地区限制"
-    assert config["rules"][0]["probe_interval"] == 300
-    assert config["rules"][1]["probe_interval"] == 60
+    assert config["rules"][0]["description"] == 'say "hi"\\ 地区\t'
+    assert config["rules"][0]["gateway"] == "WAN2"
+    assert config["rules"][1]["interface"] == "lan"
+    assert not any(k.startswith(("smart", "probe")) for r in config["rules"] for k in r)
     assert config["ip_expire_hours"] == 12
     assert config["custom_categories"][0]["label"] == 'Work "VPN" \\ x'
 

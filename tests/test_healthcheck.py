@@ -48,7 +48,7 @@ class FakeSystem:
             ("/bin/pgrep", "-f", "tcpdump.*-Q out"): "101\n102\n103\n104\n",
             (hc.IFCONFIG, "-a", "inet6"): IFCONFIG_V4_ONLY,
         }
-        self.pids = {hc.DNS_WATCHER_PID: True, hc.GEO_PROBER_PID: True}
+        self.pids = {hc.DNS_WATCHER_PID: True}
         self.ran = []
 
     def now(self):
@@ -89,7 +89,7 @@ def by_name(result):
 def test_contract_shape(hc, system):
     result = hc.run_checks(system)
     assert set(result) == {"checks"}
-    assert len(result["checks"]) == 10
+    assert len(result["checks"]) == 9
     for c in result["checks"]:
         assert set(c) == {"name", "ok", "severity", "detail"}
         assert isinstance(c["name"], str) and c["name"]
@@ -108,18 +108,15 @@ def test_healthy_fixture(hc, system):
         "DNS watcher running": True,
         "Rule gateways up": True,
         "Device sources resolved": True,
-        "Smart gateway prober": True,
         "Last leak check": True,
         "AdGuard Home upstreams": None,     # no AdGuardHome.yaml in the fixture
         "No IPv6 bypass": True,
     }
     assert "AdGuardHom" in checks["DNS forward reaches Unbound"]["detail"]
     assert "10 min ago" in checks["DNS forward reaches Unbound"]["detail"]
-    assert "4 rule(s) loaded as 6 route-to rule(s)" in checks["Firewall rules and tables loaded"]["detail"]
+    assert "4 rule(s) loaded as 5 route-to rule(s)" in checks["Firewall rules and tables loaded"]["detail"]
     assert checks["Rule gateways up"]["detail"] == "FRP_GW: Online; WAN_DHCP: Online"
     assert "my-iphone: 1 IPv4 address(es) for 1 device(s)" in checks["Device sources resolved"]["detail"]
-    # my-mbp has Smart Gateway on with one gateway: reported, not a failure
-    assert "single gateway (no effect) for: my-mbp" in checks["Smart gateway prober"]["detail"]
     assert checks["Last leak check"]["detail"].startswith("No leaks, 19 connection(s) routed")
 
 
@@ -142,7 +139,7 @@ def test_read_only_commands(hc, system, stored_ok):
 def test_disabled_plugin_everything_not_applicable(hc, system):
     system.files[hc.CONFIG_FILE] = fixture("config.json").replace('"enabled": 1', '"enabled": 0')
     checks = hc.run_checks(system)["checks"]
-    assert len(checks) == 10
+    assert len(checks) == 9
     assert all(c["ok"] is None for c in checks)
     assert checks[0]["detail"] == "App Router is disabled"
     assert system.ran == []
@@ -331,19 +328,6 @@ def test_device_offline_is_low(hc, system):
     c = by_name(hc.run_checks(system))["Device sources resolved"]
     assert c["ok"] is False and c["severity"] == "low"
     assert "my-iphone: none of 1 device(s)" in c["detail"]
-
-
-def test_smart_prober_down(hc, system):
-    system.pids[hc.GEO_PROBER_PID] = False
-    c = by_name(hc.run_checks(system))["Smart gateway prober"]
-    assert c["ok"] is False and c["severity"] == "low"
-
-
-def test_smart_not_applicable_with_single_gateways(hc, system):
-    system.files[hc.CONFIG_FILE] = fixture("config.json").replace('"WAN_DHCP,FRP_GW"', '"FRP_GW"')
-    c = by_name(hc.run_checks(system))["Smart gateway prober"]
-    assert c["ok"] is None
-    assert "my-mbp, kids" in c["detail"]
 
 
 def test_leaks_reported(hc, system):

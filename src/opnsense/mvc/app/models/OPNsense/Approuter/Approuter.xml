@@ -71,40 +71,9 @@
                 <gateway type="CSVListField">
                     <Required>Y</Required>
                     <FieldSeparator>,</FieldSeparator>
-                    <Mask>/^[a-zA-Z0-9_, ]+$/</Mask>
-                    <ValidationMessage>Enter one or more gateway names separated by commas</ValidationMessage>
+                    <Mask>/^[a-zA-Z0-9_]+$/</Mask>
+                    <ValidationMessage>Select one gateway</ValidationMessage>
                 </gateway>
-                <smartGateway type="BooleanField">
-                    <Default>0</Default>
-                    <Required>Y</Required>
-                </smartGateway>
-                <probeUrl type="TextField">
-                    <Required>N</Required>
-                    <Mask>/^https?:\/\/[^\s"'\\]{1,2048}$/i</Mask>
-                    <ValidationMessage>Enter an http:// or https:// URL</ValidationMessage>
-                </probeUrl>
-                <probeInterval type="IntegerField">
-                    <Default>300</Default>
-                    <MinimumValue>30</MinimumValue>
-                    <MaximumValue>3600</MaximumValue>
-                    <Required>N</Required>
-                    <ValidationMessage>Enter a value between 30 and 3600 seconds</ValidationMessage>
-                </probeInterval>
-                <probeMethod type="OptionField">
-                    <Default>connect_only</Default>
-                    <OptionValues>
-                        <connect_only>TCP/TLS Connect Test</connect_only>
-                        <status_code>HTTP Status Code</status_code>
-                        <body_match>Response Body Match</body_match>
-                        <latency>Latency Optimization</latency>
-                    </OptionValues>
-                    <Required>N</Required>
-                </probeMethod>
-                <probePattern type="TextField">
-                    <Required>N</Required>
-                    <Mask>/^[^\x00-\x1f\x7f]{0,512}$/u</Mask>
-                    <ValidationMessage>Pattern may not contain control characters (max 512 characters)</ValidationMessage>
-                </probePattern>
                 <customDomains type="TextField">
                     <Required>N</Required>
                     <Mask>/^[a-z0-9_.,\-]*$/i</Mask>

@@ -50,7 +50,6 @@ RESOLVE_WORKERS = 16    # concurrent DNS queries during active resolution
 RESOLVE_TIMEOUT = 3
 EXPIRE_CHECK_INTERVAL = 600  # how often to look for stale table entries
 DEFAULT_EXPIRE_HOURS = 24
-SMART_GW_STATE_FILE = "/usr/local/etc/app-router/smart_gateway_state.json"
 # firewall alias names usable as rule source (same rule as approuter.inc)
 ALIAS_NAME_RE = re.compile(r"^[A-Za-z0-9_]{1,32}$")
 MAX_ALIAS_CLIENTS = 256
@@ -78,9 +77,6 @@ ip_seen = {}
 ip_seen_lock = threading.Lock()
 # Lock for concurrent table updates from multiple sniffer threads
 table_lock = threading.Lock()
-# Active gateway tables (populated by geo_prober, read via SIGHUP)
-active_gw_tables = set()
-active_gw_tables_lock = threading.Lock()
 
 
 def log(msg, level=syslog.LOG_INFO):
@@ -486,8 +482,6 @@ def restore_seen():
             continue
         with table_lock:
             added = add_to_table(table, missing)
-            for gw_table in get_active_gw_tables_for(table):
-                add_to_table(gw_table, missing)
         total += added
         log(f"[restore] Re-added {added} learned entries to {table}")
     return total
@@ -534,8 +528,6 @@ def expire_stale_entries():
         if stale:
             with table_lock:
                 delete_from_table(table, stale)
-                for gw_table in get_active_gw_tables_for(table):
-                    delete_from_table(gw_table, stale)
             total += len(stale)
             log(f"[expire] Removed {len(stale)} stale entries from {table}")
     # drop bookkeeping for tables no longer mapped
@@ -638,29 +630,6 @@ def kill_stale_states(new_ips, client_ips):
     log(f"Killed stale states for {len(new_ips)} new IPs x {len(client_ips)} clients")
 
 
-def load_smart_gw_state():
-    """Load active gateway tables from state file written by geo_prober."""
-    global active_gw_tables
-    try:
-        with open(SMART_GW_STATE_FILE) as f:
-            data = json.load(f)
-        new_tables = set(data.get("active_tables", []))
-        with active_gw_tables_lock:
-            active_gw_tables = new_tables
-        log(f"Loaded smart gateway state: {len(new_tables)} active tables")
-    except FileNotFoundError:
-        with active_gw_tables_lock:
-            active_gw_tables = set()
-    except (json.JSONDecodeError, IOError) as e:
-        log(f"Error loading smart gateway state: {e}", syslog.LOG_ERR)
-
-
-def get_active_gw_tables_for(table):
-    """Return active _gwN tables that are derived from the given base table."""
-    with active_gw_tables_lock:
-        return {t for t in active_gw_tables if t.startswith(table + '_gw')}
-
-
 def record_names(query_domain, answer_ips, now=None):
     """Remember which name each answered IP belongs to (leak check)."""
     now = now or time.time()
@@ -724,11 +693,6 @@ def process_sniffed_dns(query_domain, answer_ips):
             if added > 0:
                 total_added += added
                 log(f"[sniff] Added {added} entries to {table} for {query_domain}")
-            # Also add to active _gwN tables for this base table
-            for gw_table in get_active_gw_tables_for(table):
-                gw_added = add_to_table(gw_table, addrs)
-                if gw_added > 0:
-                    log(f"[sniff] Added {gw_added} entries to {gw_table} for {query_domain}")
         if total_added > 0:
             client_ips = get_client_ips()
             if client_ips:
@@ -890,10 +854,6 @@ def resolve_and_update():
             total_added += added
             all_new_ips.update(addrs)
             log(f"[resolve] Added {added} new entries to {table}")
-        for gw_table in get_active_gw_tables_for(table):
-            gw_added = add_to_table(gw_table, addrs)
-            if gw_added > 0:
-                log(f"[resolve] Added {gw_added} new entries to {gw_table}")
 
     if all_new_ips:
         client_ips = get_client_ips()
@@ -936,11 +896,10 @@ def start_background_resolve(reason):
 
 
 def reload_mappings(signum=None, frame=None):
-    """SIGHUP handler: reload domain mappings and smart gateway state."""
-    log("Received SIGHUP, reloading domain mappings and smart gateway state")
+    """SIGHUP handler: reload settings and domain mappings."""
+    log("Received SIGHUP, reloading settings and domain mappings")
     load_settings()
     load_domain_mappings()
-    load_smart_gw_state()
     # Apply sends SIGHUP after the filter reload: put learned IPs back first
     restore_seen()
     # Active resolution of ~1000 domains takes minutes; never run it inside the
@@ -997,7 +956,6 @@ def main():
         load_settings()
         load_seen()
         load_domain_mappings()
-        load_smart_gw_state()
         log(f"DNS watcher started (PID {os.getpid()})")
         restored = restore_seen()
         log(f"Restored {restored} learned entries from {SEEN_FILE}")

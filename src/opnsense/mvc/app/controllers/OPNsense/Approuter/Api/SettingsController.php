@@ -47,7 +47,7 @@ class SettingsController extends ApiMutableModelControllerBase
     {
         return $this->searchBase(
             'rules.rule',
-            ['enabled', 'description', 'sourceNets', 'categories', 'customDomains', 'gateway', 'interface', 'smartGateway'],
+            ['enabled', 'description', 'sourceNets', 'categories', 'customDomains', 'gateway', 'interface'],
             'description'
         );
     }
@@ -64,7 +64,7 @@ class SettingsController extends ApiMutableModelControllerBase
             );
             $result['rule']['customDomains'] = $this->extractCsvValue($result['rule']['customDomains'] ?? '');
 
-            // Augment gateway: CSVListField → multi-select with ordering
+            // Augment gateway: CSVListField → dropdown of the configured gateways
             $gwValue = $this->extractCsvValue($result['rule']['gateway'] ?? '');
             $gwSelected = array_filter(array_map('trim', explode(',', $gwValue)));
             $gwOptions = [];
@@ -123,9 +123,8 @@ class SettingsController extends ApiMutableModelControllerBase
                     ];
                 }
             }
-            // gateway MUST be an options object for select_multiple, never a string
+            // gateway MUST be an options object for the dropdown, never a string
             $result['rule']['gateway'] = $gwOptions;
-            $result['rule']['gateway_order'] = $gwValue;
 
             // Augment categories: CSVListField → select_multiple options
             try {

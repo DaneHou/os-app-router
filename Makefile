@@ -1,5 +1,5 @@
 PLUGIN_NAME=	os-app-router
-PLUGIN_VERSION=	1.4.5
+PLUGIN_VERSION=	1.5.0
 PLUGIN_COMMENT=	Application-aware routing plugin for OPNsense
 
 PREFIX?=	/usr/local
@@ -69,7 +69,6 @@ install-plugin:
 	@mkdir -p $(PLUGIN_SCRIPTS)
 	@cp src/opnsense/scripts/OPNsense/Approuter/list_updater.py $(PLUGIN_SCRIPTS)/
 	@cp src/opnsense/scripts/OPNsense/Approuter/dns_watcher.py $(PLUGIN_SCRIPTS)/
-	@cp src/opnsense/scripts/OPNsense/Approuter/geo_prober.py $(PLUGIN_SCRIPTS)/
 	@cp src/opnsense/scripts/OPNsense/Approuter/table_manager.sh $(PLUGIN_SCRIPTS)/
 	@cp src/opnsense/scripts/OPNsense/Approuter/static_sync.py $(PLUGIN_SCRIPTS)/
 	@cp src/opnsense/scripts/OPNsense/Approuter/dns_routes.py $(PLUGIN_SCRIPTS)/
@@ -103,6 +102,18 @@ install-plugin:
 	@# Remove stale Unbound config from previous versions
 	@rm -f /var/unbound/etc/approuter.conf 2>/dev/null || true
 	@rm -f $(PLUGIN_SERVICE)/templates/OPNsense/Approuter/approuter_unbound.conf 2>/dev/null || true
+	@# Smart Gateway was removed in 1.5.0: stop its prober, drop its files and
+	@# its <prefix>_..._gwN tables (the firewall hook also removes leftovers)
+	@if [ -f /var/run/approuter_geo_prober.pid ]; then \
+		kill `cat /var/run/approuter_geo_prober.pid` 2>/dev/null || true; \
+		rm -f /var/run/approuter_geo_prober.pid; \
+	fi
+	@pkill -f 'Approuter/geo_prober.py' 2>/dev/null || true
+	@rm -f $(PLUGIN_SCRIPTS)/geo_prober.py $(PLUGIN_CONF)/smart_gateway_state.json \
+		$(PLUGIN_CONF)/smart_gateway_persist.json /var/log/approuter_geo_prober.log
+	@/sbin/pfctl -s Tables 2>/dev/null | grep -E '^[[:space:]]*approuter_[a-z0-9_]+_gw[0-9]+$$' | while read t; do \
+		/sbin/pfctl -t "$$t" -T kill >/dev/null 2>&1 || true; \
+	done
 	@# Data directories
 	@mkdir -p $(PLUGIN_CONF)/domains
 	@mkdir -p $(PLUGIN_CONF)/cidrs
@@ -158,12 +169,6 @@ uninstall:
 		rm -f /usr/local/etc/unbound.opnsense.d/approuter_dns.conf /var/unbound/etc/approuter_dns.conf; \
 		configctl unbound restart >/dev/null 2>&1 || true; \
 	fi
-	@# Stop Geo prober if running
-	@if [ -f /var/run/approuter_geo_prober.pid ]; then \
-		kill `cat /var/run/approuter_geo_prober.pid` 2>/dev/null || true; \
-		rm -f /var/run/approuter_geo_prober.pid; \
-	fi
-	@pkill -f 'geo_prober.py' 2>/dev/null || true
 	@# Flush pf tables to remove stale routing state
 	@/sbin/pfctl -s Tables 2>/dev/null | grep "^approuter_" | while read table; do \
 		/sbin/pfctl -t "$$table" -T flush 2>/dev/null || true; \
@@ -193,8 +198,6 @@ uninstall:
 	@rm -f $(PLUGIN_CONF)/state.json
 	@rm -rf /var/run/approuter
 	@rm -f /var/run/approuter_dns_watcher.pid
-	@rm -f /var/run/approuter_geo_prober.pid
-	@rm -f $(PLUGIN_CONF)/smart_gateway_state.json
 	@rm -f $(PLUGIN_CONF)/leak_check_last.json
 	@rm -f /tmp/opnsense_menu_cache.xml 2>/dev/null || true
 	@rm -rf /tmp/approuter
@@ -243,7 +246,6 @@ lint:
 	@echo ">>> Checking Python scripts..."
 	@python3 -m py_compile src/opnsense/scripts/OPNsense/Approuter/list_updater.py
 	@python3 -m py_compile src/opnsense/scripts/OPNsense/Approuter/dns_watcher.py
-	@python3 -m py_compile src/opnsense/scripts/OPNsense/Approuter/geo_prober.py
 	@python3 -m py_compile src/opnsense/scripts/OPNsense/Approuter/static_sync.py
 	@python3 -m py_compile src/opnsense/scripts/OPNsense/Approuter/unbound_flush.py
 	@python3 -m py_compile src/opnsense/scripts/OPNsense/Approuter/healthcheck.py

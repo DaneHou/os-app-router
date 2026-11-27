@@ -33,7 +33,6 @@ LEAK_CHECK_LAST = f"{APPROUTER_DIR}/leak_check_last.json"
 UNBOUND_ZONES = "/usr/local/etc/unbound.opnsense.d/approuter_dns.conf"
 DNS_WATCHER_PID = "/var/run/approuter_dns_watcher.pid"
 DNS_NAMES = "/var/run/approuter_dns_names.json"   # every sniffed A answer, rewritten each minute
-GEO_PROBER_PID = "/var/run/approuter_geo_prober.pid"
 GATEWAY_STATUS = "/usr/local/opnsense/scripts/routes/gateway_status.php"
 PFCTL = "/sbin/pfctl"
 IFCONFIG = "/sbin/ifconfig"
@@ -185,13 +184,8 @@ def rule_tables(rule, prefix):
 
 
 def rule_gateways(rule):
-    """Gateways a rule uses: all of them for smart rules, the first otherwise."""
-    gws = csv(rule.get("gateway"))
-    return gws if is_smart(rule) else gws[:1]
-
-
-def is_smart(rule):
-    return str(rule.get("smart_gateway")) == "1" and len(csv(rule.get("gateway"))) > 1
+    """The rule's gateway (older configs could list several: the first is used)."""
+    return csv(rule.get("gateway"))[:1]
 
 
 def parse_pf_rules(text):
@@ -383,19 +377,6 @@ def check_devices(system, rules):
     return check(name, not unresolved, "; ".join(parts), "low")
 
 
-def check_smart(system, rules):
-    name = "Smart gateway prober"
-    smart = [r for r in rules if is_smart(r)]
-    single = [rule_name(r) for r in rules if str(r.get("smart_gateway")) == "1" and not is_smart(r)]
-    note = (f" Smart Gateway is on with a single gateway (no effect) for: {', '.join(single)}." if single else "")
-    if not smart:
-        return check(name, None, "No rule uses Smart Gateway with 2+ gateways." + note, "low")
-    if system.pid_alive(GEO_PROBER_PID):
-        return check(name, True, f"geo_prober is running for {len(smart)} rule(s)." + note, "low")
-    return check(name, False, f"geo_prober is not running: {len(smart)} smart rule(s) stay on their fallback "
-                              "gateway." + note, "low")
-
-
 def check_leaks(system):
     name = "Last leak check"
     last = load_json(system, LEAK_CHECK_LAST)
@@ -469,7 +450,7 @@ def run_checks(system=None):
     if config is None or str(config.get("enabled")) != "1":
         for name, sev in (("DNS forward reaches Unbound", "medium"), ("Firewall rules and tables loaded", "medium"),
                           ("DNS watcher running", "medium"), ("Rule gateways up", "medium"),
-                          ("Device sources resolved", "low"), ("Smart gateway prober", "low"),
+                          ("Device sources resolved", "low"),
                           ("Last leak check", "low"), ("AdGuard Home upstreams", "low"),
                           ("No IPv6 bypass", "medium")):
             checks.append(check(name, None, "App Router is disabled", sev))
@@ -482,7 +463,6 @@ def run_checks(system=None):
         check_dns_watcher(system, rules, prefix),
         check_gateways(system, rules),
         check_devices(system, rules),
-        check_smart(system, rules),
         check_leaks(system),
         check_agh(system),
         check_ipv6(system),
