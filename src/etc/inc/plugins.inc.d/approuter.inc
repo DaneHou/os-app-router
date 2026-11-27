@@ -147,16 +147,6 @@ function approuter_parse_sources($sourceNets, $aliasNames = null)
 }
 
 /**
- * Register tables and route-to rules for the given (enabled) rules.
- * Plain IPs/CIDRs of a rule go into a file-backed <prefix>_clients_<hash>
- * table; alias sources are referenced directly as <alias> so pf follows the
- * alias contents (e.g. MAC aliases re-resolved via ARP) without a reload.
- * Device (MAC) sources use the rule's App Router managed MAC alias
- * (Sources::macAliasName(), kept in sync by MacAliases::sync()).
- * @param array|null $ownedMacAliases managed alias names that exist (null = don't check)
- * @return array valid client files/tables, custom tables and _gwN tables
- */
-/**
  * Register one App Router rule: pass with route-to the rule's gateway, then
  * the same match as block. The exit is the point of the rule, so traffic must
  * never leave by another way when it is gone:
@@ -168,18 +158,33 @@ function approuter_parse_sources($sourceNets, $aliasNames = null)
  *   is there (quick) the block is never reached.
  * A single gateway that is only marked down keeps its route-to (core leaves
  * it in place), so its traffic goes nowhere either way.
+ * Smart gateway tiers before the last pass $block = false: when their
+ * gateway is gone the traffic must fall through to the next tier, and only
+ * the last tier ends in the block.
  */
-function approuter_register_route($fw, $priority, array $conf, array $defaults)
+function approuter_register_route($fw, $priority, array $conf, array $defaults, $block = true)
 {
     $fw->registerFilterRule($priority, $conf + ['skip_rules_gw_down' => true], $defaults);
-    $block = $conf;
-    unset($block['gateway']);
-    $block['type'] = 'block';
-    $block['descr'] = $conf['descr'] . ' (blocked while the exit is down)';
-    $block['#ref'] = $conf['#ref'] . ':block';
-    $fw->registerFilterRule($priority, $block, $defaults);
+    if (!$block) {
+        return;
+    }
+    $rule = $conf;
+    unset($rule['gateway']);
+    $rule['type'] = 'block';
+    $rule['descr'] = $conf['descr'] . ' (blocked while the exit is down)';
+    $rule['#ref'] = $conf['#ref'] . ':block';
+    $fw->registerFilterRule($priority, $rule, $defaults);
 }
-
+/**
+ * Register tables and route-to rules for the given (enabled) rules.
+ * Plain IPs/CIDRs of a rule go into a file-backed <prefix>_clients_<hash>
+ * table; alias sources are referenced directly as <alias> so pf follows the
+ * alias contents (e.g. MAC aliases re-resolved via ARP) without a reload.
+ * Device (MAC) sources use the rule's App Router managed MAC alias
+ * (Sources::macAliasName(), kept in sync by MacAliases::sync()).
+ * @param array|null $ownedMacAliases managed alias names that exist (null = don't check)
+ * @return array valid client files/tables, custom tables and _gwN tables
+ */
 function approuter_register_rules($fw, array $rules, $tablePrefix, $clientsDir, $aliasNames = null, $ownedMacAliases = null)
 {
     $categoriesNeeded = [];
@@ -314,7 +319,8 @@ function approuter_register_rules($fw, array $rules, $tablePrefix, $clientsDir, 
                     $gwCustomTable = $customTableName . '_gw' . $i;
                     $fw->registerTable($gwCustomTable, true);
                     $description = 'AppRouter: ' . ($rule['description'] ?: 'custom domains') . ' via ' . trim($gateways[$i]) . ' [smart gw' . $i . ']';
-                    approuter_register_route($fw, 
+                    approuter_register_route(
+                    $fw,
                         $priority,
                         [
                             'from' => $fromClause,
@@ -325,13 +331,15 @@ function approuter_register_rules($fw, array $rules, $tablePrefix, $clientsDir, 
                             'descr' => $description,
                             '#ref' => 'approuter:' . $rule['uuid'] . ':custom:gw' . $i,
                         ],
-                        $filterDefaults
+                        $filterDefaults,
+                        false
                     );
                     $priority++;
                 }
                 // Fallback: last gateway uses main custom table
                 $description = 'AppRouter: ' . ($rule['description'] ?: 'custom domains') . ' via ' . trim(end($gateways)) . ' [fallback]';
-                approuter_register_route($fw, 
+                approuter_register_route(
+                    $fw,
                     $priority,
                     [
                         'from' => $fromClause,
@@ -348,7 +356,8 @@ function approuter_register_rules($fw, array $rules, $tablePrefix, $clientsDir, 
             } else {
                 // Non-smart: single rule with first gateway
                 $description = 'AppRouter: ' . ($rule['description'] ?: 'custom domains') . ' via ' . trim($gateways[0]);
-                approuter_register_route($fw, 
+                approuter_register_route(
+                    $fw,
                     $priority,
                     [
                         'from' => $fromClause,
@@ -379,7 +388,8 @@ function approuter_register_rules($fw, array $rules, $tablePrefix, $clientsDir, 
                 for ($i = 0; $i < count($gateways) - 1; $i++) {
                     $gwTableName = $tableName . '_gw' . $i;
                     $description = 'AppRouter: ' . ($rule['description'] ?: $category) . ' via ' . trim($gateways[$i]) . ' [smart gw' . $i . ']';
-                    approuter_register_route($fw, 
+                    approuter_register_route(
+                    $fw,
                         $priority,
                         [
                             'from' => $fromClause,
@@ -390,13 +400,15 @@ function approuter_register_rules($fw, array $rules, $tablePrefix, $clientsDir, 
                             'descr' => $description,
                             '#ref' => 'approuter:' . $rule['uuid'] . ':gw' . $i,
                         ],
-                        $filterDefaults
+                        $filterDefaults,
+                        false
                     );
                     $priority++;
                 }
                 // Last gateway: fallback using main table (always has IPs)
                 $description = 'AppRouter: ' . ($rule['description'] ?: $category) . ' via ' . trim(end($gateways)) . ' [fallback]';
-                approuter_register_route($fw, 
+                approuter_register_route(
+                    $fw,
                     $priority,
                     [
                         'from' => $fromClause,
@@ -413,7 +425,8 @@ function approuter_register_rules($fw, array $rules, $tablePrefix, $clientsDir, 
             } else {
                 // Non-smart: single rule with first gateway (existing behavior)
                 $description = 'AppRouter: ' . ($rule['description'] ?: $category) . ' via ' . trim($gateways[0]);
-                approuter_register_route($fw, 
+                approuter_register_route(
+                    $fw,
                     $priority,
                     [
                         'from' => $fromClause,

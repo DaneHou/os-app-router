@@ -309,20 +309,31 @@ namespace {
     run_case('kill_switch_block_behind_every_route', function ($check) {
         [$fw] = hook([mkrule(['customDomains' => 'example.cn']),
                       mkrule(['uuid' => '700da3ee-0000-4000-8000-000000000002', 'smartGateway' => '1',
-                              'gateway' => 'WAN_DHCP,FRP_GW', 'sourceNets' => 'Kids_MAC'])]);
-        $check('some routes', count($fw->rules) >= 4);
-        $check('as many blocks as routes', count($fw->blocks) === count($fw->rules));
+                              'gateway' => 'WAN_DHCP,FRP_GW', 'customDomains' => 'example.org',
+                              'sourceNets' => 'Kids_MAC'])]);
+        $tiers = array_values(array_filter($fw->rules, fn($r) => preg_match('/:gw\d+$/', $r['#ref'])));
+        $check('smart tiers present (category + custom)', count($tiers) === 2);
+        $check('one block per non-tier route', count($fw->blocks) === count($fw->rules) - count($tiers));
         $ok = true;
-        for ($i = 0; $i < count($fw->order); $i += 2) {
+        $i = 0;
+        while ($i < count($fw->order)) {
             $p = $fw->order[$i];
+            $ok = $ok && ($p['type'] ?? '') === 'pass' && !empty($p['skip_rules_gw_down']) && !empty($p['gateway']);
+            if (preg_match('/:gw\d+$/', $p['#ref'])) {
+                // a smart tier falls through to the next tier when its gateway is gone
+                $next = $fw->order[$i + 1] ?? [];
+                $ok = $ok && ($next['type'] ?? '') === 'pass' && $next['to'] !== $p['to'];
+                $i += 1;
+                continue;
+            }
             $b = $fw->order[$i + 1] ?? [];
-            $ok = $ok && ($p['type'] ?? '') === 'pass' && !empty($p['skip_rules_gw_down']) && !empty($p['gateway'])
-                && ($b['type'] ?? '') === 'block' && !isset($b['gateway']) && !empty($b['quick'])
+            $ok = $ok && ($b['type'] ?? '') === 'block' && !isset($b['gateway']) && !empty($b['quick'])
                 && $b['from'] === $p['from'] && $b['to'] === $p['to'] && $b['interface'] === $p['interface']
                 && $b['direction'] === $p['direction'] && $b['prio'] === $p['prio']
                 && $b['#ref'] === $p['#ref'] . ':block';
+            $i += 2;
         }
-        $check('each pass(route-to, skipped when its gateway is gone) is followed by the same match as block', $ok);
+        $check('each route ends in the same match as block; smart tiers fall through to the next tier', $ok);
     });
 
     run_case('existing_rules_identical_output', function ($check) {
