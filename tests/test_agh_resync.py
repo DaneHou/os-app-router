@@ -186,3 +186,38 @@ def test_lock_is_exclusive(agh, tmp_path, monkeypatch):
         os.close(fd)
     with agh.agh_lock(timeout=0):
         pass
+
+
+def test_validate_accepts_plan_and_rejects_anything_else(agh):
+    new, _s = agh.plan(YAML, ["iqiyi.com", "71.am"], 53530)
+    assert agh.validate(YAML, new) == (True, "")
+    folded = ("dns:\n  upstream_dns:\n    - '[/a.example/]https://doh.pub/dns-query\n"
+              "      https://dns.alidns.com/dns-query'\n    - 127.0.0.1:53530\n")
+    fnew, _s = agh.plan(folded, ["b.example"], 53530)
+    assert agh.validate(folded, fnew)[0] is True          # folded values read the same both ways
+    ok, reason = agh.validate(YAML, new.replace("    - 9.9.9.10", "    - 1.1.1.1"))
+    assert not ok and "other settings" in reason
+    ok, reason = agh.validate(YAML, new.replace("  upstream_dns:\n", "  upstream_dns:\n   - [bad\n", 1))
+    assert not ok
+
+
+def test_run_refuses_to_write_an_unvalidated_file(agh, tmp_path, monkeypatch):
+    conf = tmp_path / "AdGuardHome.yaml"
+    conf.write_text(YAML)
+    d = tmp_path / "ar"
+    d.mkdir()
+    (d / "config.json").write_text('{"enabled": 1}')
+    (d / "dns_via_gateway.txt").write_text("iqiyi.com\n")
+    (d / "dns_forward_status.json").write_text('{"unbound_port": 53530}')
+    for k, v in {"AGH_CONF": conf, "APPROUTER_DIR": d, "CONFIG_FILE": d / "config.json",
+                 "EXPORT_FILE": d / "dns_via_gateway.txt", "STATUS_FILE": d / "dns_forward_status.json",
+                 "RESULT_FILE": d / "last.json", "BACKUP_FILE": d / "bak.yaml",
+                 "UNBOUND_CONF": tmp_path / "none", "AGH_LOCK": tmp_path / "agh.lock"}.items():
+        monkeypatch.setattr(agh, k, str(v))
+    calls = []
+    monkeypatch.setattr(agh.subprocess, "run", lambda argv, **kw: calls.append(argv))
+    monkeypatch.setattr(agh, "log", lambda *a, **k: None)
+    monkeypatch.setattr(agh, "validate", lambda old, new: (False, "the edit would change other settings"))
+    r = agh.run([])
+    assert r["status"] == "error" and "other settings" in r["reason"]
+    assert conf.read_text() == YAML and calls == [] and not (d / "bak.yaml").exists()

@@ -33,6 +33,8 @@ use OPNsense\Approuter\MacAliases;
 use OPNsense\Base\ApiMutableServiceControllerBase;
 use OPNsense\Core\Backend;
 
+require_once '/usr/local/etc/inc/plugins.inc.d/approuter.inc';
+
 class ServiceController extends ApiMutableServiceControllerBase
 {
     protected static $internalServiceClass = '\OPNsense\Approuter\Approuter';
@@ -119,6 +121,13 @@ class ServiceController extends ApiMutableServiceControllerBase
             // AdGuard Home on port 53: keep its upstreams sending the "via gateway"
             // domains to Unbound (no-op when unchanged, AdGuard Home absent or sync off).
             $backend->configdRun('approuter agh_resync', true);
+
+            // The list update and leak check jobs come from approuter_cron();
+            // rewrite root's crontab when enabling, disabling or a new update
+            // interval changed them (OPNsense does it only at boot otherwise).
+            if (approuter_cron_stale()) {
+                $backend->configdRun('cron restart');
+            }
 
             $status = "ok";
         }

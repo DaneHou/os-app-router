@@ -59,6 +59,17 @@ _DOMAIN_RE = re.compile(r'^(\*\.)?[a-zA-Z0-9]([a-zA-Z0-9\-\.]*[a-zA-Z0-9])?$')
 # Custom category slugs end up in file names and pf table names
 _SLUG_RE = re.compile(r'^[a-z][a-z0-9_]{0,30}$')
 
+# Remote lists steer routing (route-to tables, DNS forwarding). A broken or
+# poisoned download must not replace the list that works: the file on disk is
+# the last known good copy and is only replaced when the new list looks sane.
+MAX_DOMAINS = 500000      # China domain list is ~120k today
+MAX_CIDRS = 100000        # aggregated China IPv4 list is ~4k today
+MIN_KEEP = 0.5            # a new list may not lose more than half of its entries
+MAX_GROW = 10             # ...nor grow more than tenfold (and by more than GROW_SLACK)
+GROW_SLACK = 200
+MAX_BAD_SHARE = 0.01      # more junk than this in a download: wrong file, not a few typos
+MIN_PREFIX = {4: 8, 6: 16}  # no remote entry may cover more than a /8 (or /16 for IPv6)
+
 
 def valid_domains(domains, source="list"):
     """Keep only syntactically valid domain names.
@@ -153,6 +164,68 @@ def parse_dnsmasq_domains(content):
     return valid_domains(domains, "dnsmasq list")
 
 
+def count_entries(path):
+    """Entries in a list file on disk (the last known good copy), 0 if none."""
+    try:
+        with open(path) as f:
+            return sum(1 for line in f if line.strip())
+    except OSError:
+        return 0
+
+
+def list_problem(new_count, old_count, limit):
+    """-> why a new list must not replace the old one, or None if it looks sane."""
+    if new_count == 0:
+        return "empty"
+    if new_count > limit:
+        return f"{new_count} entries, more than the {limit} allowed"
+    if old_count and new_count < old_count * MIN_KEEP:
+        return f"shrank from {old_count} to {new_count} entries"
+    if old_count and new_count > max(old_count * MAX_GROW, old_count + GROW_SLACK):
+        return f"grew from {old_count} to {new_count} entries"
+    return None
+
+
+def public_networks(cidrs):
+    """-> (kept, dropped): only globally routable networks no wider than MIN_PREFIX.
+    Private, reserved, loopback, multicast or link-local ranges from a remote list
+    would pull local traffic into a route-to table."""
+    kept, dropped = set(), 0
+    for c in cidrs:
+        try:
+            net = ipaddress.ip_network(c, strict=False)
+        except ValueError:
+            dropped += 1
+            continue
+        if net.prefixlen < MIN_PREFIX[net.version] or not net.is_global or net.is_multicast:
+            dropped += 1
+            continue
+        kept.add(str(net))
+    return kept, dropped
+
+
+def note_rejected(state, name, reason):
+    state.setdefault("rejected", {})[name] = {"at": int(time.time()), "reason": reason}
+    log(f"List update for {name} rejected ({reason}); keeping the previous list", syslog.LOG_WARNING)
+
+
+def note_accepted(state, name):
+    (state.get("rejected") or {}).pop(name, None)
+
+
+def checked_remote_cidrs(content, source_id, state):
+    """Parsed CIDRs of one remote download, or None when it must be ignored."""
+    lines = [l.strip() for l in content.split("\n") if l.strip() and not l.strip().startswith("#")]
+    kept, dropped = public_networks(lines)
+    if lines and dropped / len(lines) > MAX_BAD_SHARE:
+        note_rejected(state, source_id, f"{dropped} of {len(lines)} entries are not public networks")
+        return None
+    note_accepted(state, source_id)
+    if dropped:
+        log(f"Dropped {dropped} non-public or too wide entries from {source_id}", syslog.LOG_WARNING)
+    return kept
+
+
 def parse_cidr_list(content):
     cidrs = set()
     for line in content.strip().split("\n"):
@@ -231,16 +304,25 @@ def update_v2fly_domains(categories, state):
             key = f"{cat_id}.{app_id}"
             state_key = f"v2fly_{v2fly_name}"
             remote_domains = fetch_v2fly_domains(v2fly_name)
-            if remote_domains:
-                state[f"last_update_{state_key}"] = int(time.time())
-                state[f"count_{state_key}"] = len(remote_domains)
-                log(f"Fetched {len(remote_domains)} domains from v2fly/{v2fly_name} for {key}")
-            else:
-                log(f"No domains from v2fly/{v2fly_name}, using local fallback for {key}",
-                    syslog.LOG_WARNING)
-            # Merge: remote + local fallback
             local_domains = set(app_data.get("domains", []))
-            merged[key] = remote_domains | local_domains
+            cached = cached_domains(key) | local_domains
+            if not remote_domains:
+                log(f"No domains from v2fly/{v2fly_name}, keeping the last list for {key}",
+                    syslog.LOG_WARNING)
+                merged[key] = cached
+                continue
+            candidate = remote_domains | local_domains
+            problem = list_problem(len(candidate), count_entries(os.path.join(DOMAINS_DIR, f"{key}.txt")),
+                                   MAX_DOMAINS)
+            if problem:
+                note_rejected(state, f"v2fly/{v2fly_name}", problem)
+                merged[key] = cached
+                continue
+            note_accepted(state, f"v2fly/{v2fly_name}")
+            state[f"last_update_{state_key}"] = int(time.time())
+            state[f"count_{state_key}"] = len(remote_domains)
+            log(f"Fetched {len(remote_domains)} domains from v2fly/{v2fly_name} for {key}")
+            merged[key] = candidate
     return merged
 
 
@@ -454,9 +536,10 @@ def update_remote_lists(config, state):
                     china_domains.update(domains)
                     log(f"Fetched {len(domains)} domains from {source_id}")
                 elif source["type"] == "cidr":
-                    cidrs = parse_cidr_list(content)
-                    china_cidrs.update(cidrs)
-                    log(f"Fetched {len(cidrs)} CIDRs from {source_id}")
+                    cidrs = checked_remote_cidrs(content, source_id, state)
+                    if cidrs is not None:
+                        china_cidrs.update(cidrs)
+                        log(f"Fetched {len(cidrs)} CIDRs from {source_id}")
                 updated = True
             elif not changed:
                 log(f"Source {source_id} not modified (ETag match)")
@@ -474,9 +557,10 @@ def update_remote_lists(config, state):
                             china_domains.update(domains)
                             log(f"Fallback OK: {len(domains)} domains from {source_id}")
                         elif source["type"] == "cidr":
-                            cidrs = parse_cidr_list(content)
-                            china_cidrs.update(cidrs)
-                            log(f"Fallback OK: {len(cidrs)} CIDRs from {source_id}")
+                            cidrs = checked_remote_cidrs(content, source_id, state)
+                            if cidrs is not None:
+                                china_cidrs.update(cidrs)
+                                log(f"Fallback OK: {len(cidrs)} CIDRs from {source_id}")
                         updated = True
                 except Exception as e2:
                     log(f"Fallback also failed for {source_id}: {e2}", syslog.LOG_ERR)
@@ -498,21 +582,35 @@ def update_remote_lists(config, state):
                         if line and not line.startswith("#"):
                             china_domains.update(valid_domains([line], f"custom source {idx}"))
                 elif stype == "cidr":
-                    china_cidrs.update(parse_cidr_list(content))
+                    cidrs = checked_remote_cidrs(content, source_id, state)
+                    if cidrs is not None:
+                        china_cidrs.update(cidrs)
                 updated = True
         except Exception as e:
             log(f"Error fetching custom source {idx}: {e}", syslog.LOG_ERR)
 
     if china_cidrs:
         aggregated = aggregate_cidrs(china_cidrs)
-        write_cidr_file("china_all", aggregated)
-        state["china_cidrs_count"] = len(aggregated)
-        log(f"Written {len(aggregated)} aggregated China CIDRs")
+        problem = list_problem(len(aggregated), count_entries(os.path.join(CIDRS_DIR, "china_all.txt")),
+                               MAX_CIDRS)
+        if problem:
+            note_rejected(state, "china_all CIDRs", problem)
+        else:
+            write_cidr_file("china_all", aggregated)
+            note_accepted(state, "china_all CIDRs")
+            state["china_cidrs_count"] = len(aggregated)
+            log(f"Written {len(aggregated)} aggregated China CIDRs")
 
     if china_domains:
-        write_domain_file("china_all", china_domains)
-        state["china_domains_count"] = len(china_domains)
-        log(f"Written {len(china_domains)} China domains")
+        problem = list_problem(len(china_domains), count_entries(os.path.join(DOMAINS_DIR, "china_all.txt")),
+                               MAX_DOMAINS)
+        if problem:
+            note_rejected(state, "china_all domains", problem)
+        else:
+            write_domain_file("china_all", china_domains)
+            note_accepted(state, "china_all domains")
+            state["china_domains_count"] = len(china_domains)
+            log(f"Written {len(china_domains)} China domains")
 
     return updated
 
@@ -558,6 +656,15 @@ def update_tables():
     signal_dns_watcher()
 
 
+def cached_domains(key):
+    """Domains of the per-app list written by the last accepted update."""
+    try:
+        with open(os.path.join(DOMAINS_DIR, f"{key}.txt")) as f:
+            return valid_domains(f.read().split(), f"cache {key}")
+    except OSError:
+        return set()
+
+
 def load_cached_v2fly(categories):
     """Merged per-app domain sets written by the last full update.
 
@@ -571,13 +678,7 @@ def load_cached_v2fly(categories):
             if not app_data.get("v2fly"):
                 continue
             key = f"{cat_id}.{app_id}"
-            domains = set(app_data.get("domains", []))
-            try:
-                with open(os.path.join(DOMAINS_DIR, f"{key}.txt")) as f:
-                    domains.update(valid_domains(f.read().split(), f"cache {key}"))
-            except OSError:
-                pass
-            merged[key] = domains
+            merged[key] = set(app_data.get("domains", [])) | cached_domains(key)
     return merged
 
 

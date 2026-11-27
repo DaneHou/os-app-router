@@ -146,6 +146,26 @@ function approuter_parse_sources($sourceNets, $aliasNames = null)
 }
 
 /**
+ * Client files are written here, in the firewall hook, on purpose: pf loads the
+ * file-backed <prefix>_clients_<hash> tables from them while this rule set
+ * loads, and the hook is the one place that runs for every load (boot, Apply,
+ * config restore, HA sync). Only a changed file is replaced, atomically, so
+ * dns_watcher never reads a half-written one. -> false on a write error.
+ */
+function approuter_write_if_changed($path, $content)
+{
+    if (@file_get_contents($path) === $content) {
+        return true;
+    }
+    $tmp = $path . '.tmp';
+    if (@file_put_contents($tmp, $content) === false || !@rename($tmp, $path)) {
+        @unlink($tmp);
+        return false;
+    }
+    return true;
+}
+
+/**
  * Register one App Router rule: pass with route-to the rule's gateway, then
  * the same match as block. The exit is the point of the rule, so traffic must
  * never leave by another way when it is gone:
@@ -239,8 +259,7 @@ function approuter_register_rules($fw, array $rules, $tablePrefix, $clientsDir, 
             $froms = [];
             if (!empty($sources['nets'])) {
                 $clientFile = $clientsDir . '/' . $clientTableName . '.txt';
-                $written = file_put_contents($clientFile, implode("\n", $sources['nets']) . "\n");
-                if ($written === false) {
+                if (!approuter_write_if_changed($clientFile, implode("\n", $sources['nets']) . "\n")) {
                     syslog(LOG_ERR, "approuter: failed to write client file $clientFile");
                 }
                 // core signature is registerTable($name, $persist, $file)
@@ -252,7 +271,7 @@ function approuter_register_rules($fw, array $rules, $tablePrefix, $clientsDir, 
             if (!empty($sourceAliases)) {
                 // alias names for dns_watcher (state kills); pf reads the alias tables itself
                 $aliasFile = $clientsDir . '/' . $clientTableName . '.aliases';
-                if (file_put_contents($aliasFile, implode("\n", $sourceAliases) . "\n") === false) {
+                if (!approuter_write_if_changed($aliasFile, implode("\n", $sourceAliases) . "\n")) {
                     syslog(LOG_ERR, "approuter: failed to write alias file $aliasFile");
                 }
                 $validClientFiles[] = $clientTableName . '.aliases';
@@ -489,4 +508,33 @@ function approuter_cron()
     }
 
     return $jobs;
+}
+
+/**
+ * True when root's crontab does not hold exactly the jobs approuter_cron() wants (for
+ * example right after the plugin was enabled, disabled or its schedule
+ * changed). OPNsense only rewrites the crontab at boot or on "cron restart",
+ * so Apply calls this and runs "cron restart" when it returns true. Lines are
+ * rendered the way core's system_cron_configure() writes them.
+ */
+function approuter_cron_stale($tabPath = '/var/cron/tabs/root')
+{
+    $tab = @file_get_contents($tabPath);
+    if ($tab === false) {
+        return false;
+    }
+    $want = [];
+    foreach (approuter_cron() as $job) {
+        $a = array_values($job['autocron']) + [1 => '0', 2 => '*', 3 => '*', 4 => '*', 5 => '*'];
+        $want[] = "{$a[1]}\t{$a[2]}\t{$a[3]}\t{$a[4]}\t{$a[5]}\t({$a[0]}) > /dev/null";
+    }
+    $have = [];
+    foreach (explode("\n", $tab) as $line) {
+        if (strpos($line, '/scripts/OPNsense/Approuter/') !== false) {
+            $have[] = $line;
+        }
+    }
+    sort($want);
+    sort($have);
+    return $want !== $have;
 }

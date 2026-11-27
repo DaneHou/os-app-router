@@ -1,5 +1,5 @@
 PLUGIN_NAME=	os-app-router
-PLUGIN_VERSION=	1.5.0
+PLUGIN_VERSION=	1.6.0
 PLUGIN_COMMENT=	Application-aware routing plugin for OPNsense
 
 PREFIX?=	/usr/local
@@ -125,13 +125,11 @@ install-plugin:
 
 activate:
 	@echo ">>> Activating plugin..."
-	@# Flush ALL caches so changes take effect (Volt templates, menu, opcache)
-	@rm -f /tmp/opnsense_menu_cache.xml 2>/dev/null || true
-	@rm -f /tmp/*.cache 2>/dev/null || true
-	@rm -rf /tmp/opnsense_volt_templates 2>/dev/null || true
-	@rm -rf /var/cache/opnsense 2>/dev/null || true
-	@rm -rf $(PLUGIN_MVC)/cache/* 2>/dev/null || true
-	@rm -rf $(DESTDIR)$(PREFIX)/opnsense/mvc/app/cache/* 2>/dev/null || true
+	@# Flush the GUI caches so changes take effect (menu, ACL, compiled Volt
+	@# templates). Only OPNsense's own GUI caches: other /tmp/*.cache files
+	@# (e.g. core's alias_filter_arp.cache) belong to other components.
+	@rm -f /tmp/opnsense_menu_cache.xml /tmp/opnsense_acl_cache.json 2>/dev/null || true
+	@rm -f $(DESTDIR)$(PREFIX)/opnsense/mvc/app/cache/*.php 2>/dev/null || true
 	@# Verify PHP syntax
 	@find $(PLUGIN_MVC)/controllers/OPNsense/Approuter -name '*.php' -exec php -l {} \; 2>&1 | grep -v "No syntax errors" || true
 	@find $(PLUGIN_MVC)/models/OPNsense/Approuter -name '*.php' -exec php -l {} \; 2>&1 | grep -v "No syntax errors" || true
@@ -221,17 +219,12 @@ uninstall-all: uninstall
 	@rm -f $(DESTDIR)$(PREFIX)/etc/dnsmasq.opnsense.d/approuter_*.conf
 	@# Remove generated template output
 	@rm -f $(DESTDIR)$(PREFIX)/etc/app-router/config.json
-	@# Flush all OPNsense caches
-	@rm -f /tmp/opnsense_menu_cache.xml 2>/dev/null || true
-	@rm -f /tmp/*.cache 2>/dev/null || true
-	@rm -rf /tmp/opnsense_volt_templates 2>/dev/null || true
-	@rm -rf /var/cache/opnsense 2>/dev/null || true
-	@# Remove Approuter config from config.xml (OPNsense model data)
-	@if [ -f /conf/config.xml ]; then \
-		cp /conf/config.xml /conf/config.xml.pre-approuter-uninstall; \
-		sed -i '' '/<Approuter>/,/<\/Approuter>/d' /conf/config.xml; \
-		echo ">>> Removed <Approuter> from config.xml (backup: config.xml.pre-approuter-uninstall)"; \
-	fi
+	@# Flush the GUI caches (OPNsense's own only)
+	@rm -f /tmp/opnsense_menu_cache.xml /tmp/opnsense_acl_cache.json 2>/dev/null || true
+	@rm -f $(DESTDIR)$(PREFIX)/opnsense/mvc/app/cache/*.php 2>/dev/null || true
+	@# Remove the App Router settings through the Config API (locked, saved as
+	@# a new revision, so System > Configuration > History can restore it)
+	@php -d log_errors=0 -r 'require_once "config.inc"; $$c = OPNsense\Core\Config::getInstance(); $$x = $$c->object(); if (isset($$x->OPNsense->Approuter)) { unset($$x->OPNsense->Approuter); $$c->save(); echo ">>> Removed the App Router settings (previous revision kept in /conf/backup)\n"; }' || echo ">>> Could not remove the App Router settings; remove them in the GUI or restore a backup"
 	@# Restart services to clear all state
 	@service configd restart 2>/dev/null || true
 	@service php-fpm restart 2>/dev/null || true

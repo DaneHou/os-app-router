@@ -30,6 +30,7 @@ APPROUTER_DIR = "/usr/local/etc/app-router"
 CONFIG_FILE = f"{APPROUTER_DIR}/config.json"
 DNS_FORWARD_STATUS = f"{APPROUTER_DIR}/dns_forward_status.json"
 LEAK_CHECK_LAST = f"{APPROUTER_DIR}/leak_check_last.json"
+LIST_STATE = f"{APPROUTER_DIR}/state.json"           # list_updater.py
 UNBOUND_ZONES = "/usr/local/etc/unbound.opnsense.d/approuter_dns.conf"
 DNS_WATCHER_PID = "/var/run/approuter_dns_watcher.pid"
 DNS_NAMES = "/var/run/approuter_dns_names.json"   # every sniffed A answer, rewritten each minute
@@ -41,6 +42,7 @@ DRILL = "/usr/bin/drill"
 CMD_TIMEOUT = 4
 DEADLINE = 8              # seconds: stop running commands after this
 LEAK_MAX_AGE = 3 * 86400  # the leak check runs daily (cron); older than this is stale
+LIST_MAX_AGE = 3 * 86400  # lists update daily (03:30)
 LEARN_GRACE = 15 * 60     # a freshly started watcher has no parsed answers yet
 NAMES_STALE = 10 * 60     # the names file is rewritten every minute
 LEARN_STALE = 60 * 60     # household devices resolve names all the time
@@ -396,6 +398,24 @@ def check_leaks(system):
     return check(name, True, f"No leaks, {routed} connection(s) routed ({when})", "low")
 
 
+def check_lists(system):
+    """Remote domain/CIDR lists are replaced only when the new download looks
+    sane (list_updater.py); a rejected update keeps the previous list and is
+    reported here until a later download is accepted."""
+    name = "Remote lists"
+    state = load_json(system, LIST_STATE)
+    if not isinstance(state, dict) or not state.get("last_full_update"):
+        return check(name, None, "No list update has run yet (daily at 03:30)", "low")
+    rejected = state.get("rejected") or {}
+    if isinstance(rejected, dict) and rejected:
+        parts = [f"{n}: {(v or {}).get('reason', '?')}" for n, v in sorted(rejected.items())]
+        return check(name, False, "Update rejected, previous list kept: " + "; ".join(parts), "low")
+    age = system.now() - float(state["last_full_update"])
+    if age > LIST_MAX_AGE:
+        return check(name, False, f"Lists last updated {int(age // 86400)} days ago", "low")
+    return check(name, True, f"Lists updated {ago(age)} ago", "low")
+
+
 def check_agh(system):
     name = "AdGuard Home upstreams"
     try:
@@ -451,8 +471,8 @@ def run_checks(system=None):
         for name, sev in (("DNS forward reaches Unbound", "medium"), ("Firewall rules and tables loaded", "medium"),
                           ("DNS watcher running", "medium"), ("Rule gateways up", "medium"),
                           ("Device sources resolved", "low"),
-                          ("Last leak check", "low"), ("AdGuard Home upstreams", "low"),
-                          ("No IPv6 bypass", "medium")):
+                          ("Last leak check", "low"), ("Remote lists", "low"),
+                          ("AdGuard Home upstreams", "low"), ("No IPv6 bypass", "medium")):
             checks.append(check(name, None, "App Router is disabled", sev))
         return {"checks": checks}
     prefix = config.get("table_prefix") or "approuter"
@@ -464,6 +484,7 @@ def run_checks(system=None):
         check_gateways(system, rules),
         check_devices(system, rules),
         check_leaks(system),
+        check_lists(system),
         check_agh(system),
         check_ipv6(system),
     ]

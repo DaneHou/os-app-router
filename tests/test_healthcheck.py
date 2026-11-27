@@ -35,6 +35,7 @@ class FakeSystem:
             hc.CONFIG_FILE: fixture("config.json"),
             hc.DNS_FORWARD_STATUS: fixture("dns_forward_status.json"),
             hc.LEAK_CHECK_LAST: fixture("leak_check_last.json"),
+            hc.LIST_STATE: json.dumps({"last_full_update": NOW - 7200}),
             hc.DNS_NAMES: json.dumps({"updated": NOW - 30,
                                       "names": {"203.0.113.5": ["www.example.com", NOW - 40],
                                                 "203.0.113.6": ["old.example.com", NOW - 5000]}}),
@@ -89,7 +90,7 @@ def by_name(result):
 def test_contract_shape(hc, system):
     result = hc.run_checks(system)
     assert set(result) == {"checks"}
-    assert len(result["checks"]) == 9
+    assert len(result["checks"]) == 10
     for c in result["checks"]:
         assert set(c) == {"name", "ok", "severity", "detail"}
         assert isinstance(c["name"], str) and c["name"]
@@ -109,6 +110,7 @@ def test_healthy_fixture(hc, system):
         "Rule gateways up": True,
         "Device sources resolved": True,
         "Last leak check": True,
+        "Remote lists": True,
         "AdGuard Home upstreams": None,     # no AdGuardHome.yaml in the fixture
         "No IPv6 bypass": True,
     }
@@ -139,7 +141,7 @@ def test_read_only_commands(hc, system, stored_ok):
 def test_disabled_plugin_everything_not_applicable(hc, system):
     system.files[hc.CONFIG_FILE] = fixture("config.json").replace('"enabled": 1', '"enabled": 0')
     checks = hc.run_checks(system)["checks"]
-    assert len(checks) == 9
+    assert len(checks) == 10
     assert all(c["ok"] is None for c in checks)
     assert checks[0]["detail"] == "App Router is disabled"
     assert system.ran == []
@@ -382,3 +384,16 @@ def test_ipv6_on_a_lan_is_a_bypass(hc, system):
 def test_ipv6_unreadable_is_not_applicable(hc, system):
     del system.commands[(hc.IFCONFIG, "-a", "inet6")]
     assert by_name(hc.run_checks(system))["No IPv6 bypass"]["ok"] is None
+
+
+def test_remote_lists_check(hc, system):
+    c = by_name(hc.run_checks(system))["Remote lists"]
+    assert c["ok"] is True and "2 h" in c["detail"]
+    system.files[hc.LIST_STATE] = json.dumps({"last_full_update": NOW - 3600, "rejected": {
+        "china_all domains": {"at": NOW - 3600, "reason": "shrank from 100 to 1 entries"}}})
+    c = by_name(hc.run_checks(system))["Remote lists"]
+    assert c["ok"] is False and "previous list kept" in c["detail"] and "shrank" in c["detail"]
+    system.files[hc.LIST_STATE] = json.dumps({"last_full_update": NOW - 5 * 86400})
+    assert by_name(hc.run_checks(system))["Remote lists"]["ok"] is False
+    del system.files[hc.LIST_STATE]
+    assert by_name(hc.run_checks(system))["Remote lists"]["ok"] is None

@@ -17,8 +17,11 @@ China list sending iqiyi.com to doh.pub): AdGuard Home merges the upstreams of
 duplicate domain entries, which would defeat the gateway path.
 
 Only ``dns.upstream_dns`` list items are touched; everything else in the file
-is kept byte for byte. The file is rewritten (backup first, mode kept) and
-AdGuard Home restarted only when the list changed. Never prints the file.
+is kept byte for byte (VPN Link edits dns.bind_hosts the same way, and AdGuard
+Home owns the rest). Before writing, the new text is parsed as YAML: it must
+hold exactly the intended upstream_dns list and nothing else may differ. The
+file is rewritten (backup first, mode kept) and AdGuard Home restarted only
+when the list changed. Never prints the file.
 
 Usage: agh_resync.py [--check] [--no-restart]
   --check       report only (JSON), change nothing
@@ -192,6 +195,37 @@ def plan(yaml_text, domains, port):
     return new_text, dict(summary, status="changed")
 
 
+def validate(old_text, new_text):
+    """The edited file must parse as YAML, hold exactly the upstream_dns list the
+    line editor meant, and be otherwise identical. -> (ok, reason)"""
+    try:
+        import yaml
+    except ImportError:
+        return False, "PyYAML not available, refusing to write without checking the result"
+    loader = getattr(yaml, "CSafeLoader", yaml.SafeLoader)
+    try:
+        old = yaml.load(old_text, Loader=loader)
+        new = yaml.load(new_text, Loader=loader)
+    except yaml.YAMLError as e:
+        return False, "edited file does not parse: " + (str(e).splitlines() or ["error"])[0]
+    lines = new_text.split("\n")
+    loc = find_upstreams(lines)
+    if loc is None or not isinstance(new, dict) or not isinstance(new.get("dns"), dict):
+        return False, "edited file has no dns.upstream_dns list"
+    intended = [item_value(lines, a, b) for a, b in loc[3]]
+    if new["dns"].get("upstream_dns") != intended:
+        return False, "upstream_dns would not be what was intended"
+    if not isinstance(old, dict) or not isinstance(old.get("dns"), dict):
+        return False, "current file has no dns section"
+    old_rest, new_rest = dict(old), dict(new)
+    old_dns, new_dns = dict(old_rest.pop("dns")), dict(new_rest.pop("dns"))
+    old_dns.pop("upstream_dns", None)
+    new_dns.pop("upstream_dns", None)
+    if old_rest != new_rest or old_dns != new_dns:
+        return False, "the edit would change other settings"
+    return True, ""
+
+
 def check(yaml_text, domains, port):
     """Read-only verdict for the health check: (ok, detail)."""
     _new, summary = plan(yaml_text, domains, port)
@@ -283,6 +317,10 @@ def run(argv):
         result.update(summary)
         if new_text is None:
             return result
+        ok, reason = validate(yaml_text, new_text)
+        if not ok:
+            log(f"AdGuard Home upstreams not changed: {reason}", syslog.LOG_ERR)
+            return dict(result, status="error", reason=reason)
         os.makedirs(APPROUTER_DIR, exist_ok=True)
         shutil.copy2(AGH_CONF, BACKUP_FILE)
         os.chmod(BACKUP_FILE, 0o600)
