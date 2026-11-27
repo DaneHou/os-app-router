@@ -32,6 +32,7 @@ DNS_FORWARD_STATUS = f"{APPROUTER_DIR}/dns_forward_status.json"
 LEAK_CHECK_LAST = f"{APPROUTER_DIR}/leak_check_last.json"
 UNBOUND_ZONES = "/usr/local/etc/unbound.opnsense.d/approuter_dns.conf"
 DNS_WATCHER_PID = "/var/run/approuter_dns_watcher.pid"
+DNS_NAMES = "/var/run/approuter_dns_names.json"   # every sniffed A answer, rewritten each minute
 GEO_PROBER_PID = "/var/run/approuter_geo_prober.pid"
 GATEWAY_STATUS = "/usr/local/opnsense/scripts/routes/gateway_status.php"
 PFCTL = "/sbin/pfctl"
@@ -41,6 +42,9 @@ DRILL = "/usr/bin/drill"
 CMD_TIMEOUT = 4
 DEADLINE = 8              # seconds: stop running commands after this
 LEAK_MAX_AGE = 3 * 86400  # the leak check runs daily (cron); older than this is stale
+LEARN_GRACE = 15 * 60     # a freshly started watcher has no parsed answers yet
+NAMES_STALE = 10 * 60     # the names file is rewritten every minute
+LEARN_STALE = 60 * 60     # household devices resolve names all the time
 DOWN_STATES = {"down", "force_down"}
 
 MAC_RE = re.compile(r"^[0-9a-f]{1,2}([:-])[0-9a-f]{1,2}(\1[0-9a-f]{1,2}){4}$", re.I)
@@ -82,6 +86,12 @@ class System:
         except (OSError, subprocess.SubprocessError):
             return None
         return proc.stdout if proc.returncode == 0 else None
+
+    def mtime(self, path):
+        try:
+            return os.path.getmtime(path)
+        except OSError:
+            return None
 
     def pid_alive(self, pidfile):
         try:
@@ -281,7 +291,44 @@ def check_dns_watcher(system, rules, prefix):
     if sniffers == 0:
         return check(name, False, "dns_watcher is running but has no tcpdump sniffer: DNS answers are not seen",
                      fix=FIX_DNS_WATCHER)
-    return check(name, True, f"dns_watcher is running with {sniffers} sniffer(s)")
+    return check_learning(system, name, sniffers)
+
+
+def ago(seconds):
+    seconds = int(seconds)
+    if seconds < 120:
+        return f"{seconds} s"
+    if seconds < 7200:
+        return f"{seconds // 60} min"
+    return f"{seconds // 3600} h"
+
+
+def check_learning(system, name, sniffers):
+    """Running sniffers prove nothing if their output is no longer understood
+    (dns_watcher parses tcpdump text). Every parsed A answer, for any domain,
+    lands in DNS_NAMES, so a stale newest entry means learning has stopped."""
+    now = system.now()
+    running = f"dns_watcher is running with {sniffers} sniffer(s)"
+    started = system.mtime(DNS_WATCHER_PID)
+    if started is not None and now - started < LEARN_GRACE:
+        return check(name, True, f"{running}, started {ago(now - started)} ago")
+    data = load_json(system, DNS_NAMES)
+    if not isinstance(data, dict) or not isinstance(data.get("names"), dict):
+        return check(name, False, f"{running} but has not written {DNS_NAMES}: it may be stuck, "
+                                  "so new CDN addresses are not learned", fix=FIX_DNS_WATCHER)
+    try:
+        updated = float(data.get("updated") or 0)
+        newest = max((float(v[1]) for v in data["names"].values()), default=0)
+    except (TypeError, ValueError, IndexError):
+        updated, newest = 0, 0
+    if now - updated > NAMES_STALE:
+        return check(name, False, f"{running} but its DNS log stopped updating {ago(now - updated)} ago: "
+                                  "it may be stuck, so new CDN addresses are not learned", fix=FIX_DNS_WATCHER)
+    if not newest or now - newest > LEARN_STALE:
+        since = f"in the last {ago(now - newest)}" if newest else "at all"
+        return check(name, False, f"{running} but has understood no DNS answer {since}: learning has stopped "
+                                  "(tcpdump output changed, or no DNS passes the LAN interfaces)", fix=FIX_DNS_WATCHER)
+    return check(name, True, f"{running}; last DNS answer parsed {ago(now - newest)} ago")
 
 
 def check_gateways(system, rules):

@@ -35,7 +35,11 @@ class FakeSystem:
             hc.CONFIG_FILE: fixture("config.json"),
             hc.DNS_FORWARD_STATUS: fixture("dns_forward_status.json"),
             hc.LEAK_CHECK_LAST: fixture("leak_check_last.json"),
+            hc.DNS_NAMES: json.dumps({"updated": NOW - 30,
+                                      "names": {"203.0.113.5": ["www.example.com", NOW - 40],
+                                                "203.0.113.6": ["old.example.com", NOW - 5000]}}),
         }
+        self.mtimes = {hc.DNS_WATCHER_PID: NOW - 86400}
         self.commands = {
             (hc.PFCTL, "-sr"): fixture("pfctl_sr.txt"),
             (hc.PFCTL, "-s", "Tables"): fixture("pfctl_tables.txt"),
@@ -56,6 +60,9 @@ class FakeSystem:
     def run(self, argv):
         self.ran.append(tuple(argv))
         return self.commands.get(tuple(argv))
+
+    def mtime(self, path):
+        return self.mtimes.get(path)
 
     def pid_alive(self, pidfile):
         return self.pids.get(pidfile, False)
@@ -257,6 +264,42 @@ def test_dns_watcher_down(hc, system):
 def test_dns_watcher_without_sniffers(hc, system):
     system.commands[("/bin/pgrep", "-f", "tcpdump.*-Q out")] = None
     assert by_name(hc.run_checks(system))["DNS watcher running"]["ok"] is False
+
+
+def test_learning_ok_reports_last_answer(hc, system):
+    c = by_name(hc.run_checks(system))["DNS watcher running"]
+    assert c["ok"] is True and "last DNS answer parsed 40 s ago" in c["detail"]
+
+
+def test_learning_stopped_when_no_answer_parsed(hc, system):
+    """Sniffers run, the names file is rewritten, but nothing was understood."""
+    system.files[hc.DNS_NAMES] = json.dumps({"updated": NOW - 30,
+                                             "names": {"203.0.113.5": ["a.example.com", NOW - 2 * 3600]}})
+    c = by_name(hc.run_checks(system))["DNS watcher running"]
+    assert c["ok"] is False and "learning has stopped" in c["detail"] and "2 h" in c["detail"]
+    assert c["fix"]["action"] == "approuter dns_watcher_restart"
+    system.files[hc.DNS_NAMES] = json.dumps({"updated": NOW - 30, "names": {}})
+    c = by_name(hc.run_checks(system))["DNS watcher running"]
+    assert c["ok"] is False and "no DNS answer at all" in c["detail"]
+
+
+def test_learning_names_file_stale_or_missing(hc, system):
+    system.files[hc.DNS_NAMES] = json.dumps({"updated": NOW - 1800, "names": {"203.0.113.5": ["a", NOW - 1800]}})
+    c = by_name(hc.run_checks(system))["DNS watcher running"]
+    assert c["ok"] is False and "stopped updating 30 min ago" in c["detail"]
+    del system.files[hc.DNS_NAMES]
+    c = by_name(hc.run_checks(system))["DNS watcher running"]
+    assert c["ok"] is False and "has not written" in c["detail"]
+    system.files[hc.DNS_NAMES] = "not json"
+    assert by_name(hc.run_checks(system))["DNS watcher running"]["ok"] is False
+
+
+def test_learning_grace_after_start(hc, system):
+    """A watcher started a few minutes ago has nothing parsed yet: not an error."""
+    del system.files[hc.DNS_NAMES]
+    system.mtimes[hc.DNS_WATCHER_PID] = NOW - 120
+    c = by_name(hc.run_checks(system))["DNS watcher running"]
+    assert c["ok"] is True and "started 2 min ago" in c["detail"]
 
 
 def test_gateway_down(hc, system):
